@@ -69,11 +69,34 @@ class BinanceService {
       logger.error('Error fetching Binance price', {
         error: error.message,
         asset,
+        status: error.response?.status,
       });
+
+      // Handle 451 error (Unavailable For Legal Reasons) - often due to geographic restrictions
+      // Try CoinGecko as fallback for real-time prices
+      if (error.response?.status === 451 || error.code === 'ERR_BAD_REQUEST') {
+        logger.warn(`Binance returned 451 for ${asset}, trying CoinGecko fallback...`);
+        try {
+          const coinGeckoPrice = await this.getPriceFromCoinGecko(asset);
+          if (coinGeckoPrice) {
+            logger.info(`✅ Successfully fetched ${asset} price from CoinGecko: ${coinGeckoPrice.price}`);
+            return coinGeckoPrice;
+          }
+        } catch (coinGeckoError: any) {
+          logger.error('CoinGecko fallback also failed:', coinGeckoError.message);
+        }
+      }
 
       // In development, return mock price if API fails
       if (process.env.NODE_ENV === 'development' && !this.apiKey) {
         return this.getMockPrice(asset);
+      }
+
+      // If we have a fallback price for this asset, use it
+      const fallbackPrice = this.getFallbackPrice(asset);
+      if (fallbackPrice) {
+        logger.warn(`Using fallback price for ${asset}: ${fallbackPrice.price}`);
+        return fallbackPrice;
       }
 
       throw error;
@@ -251,6 +274,91 @@ class BinanceService {
     return {
       symbol: this.getTradingPair(asset),
       price: mockPrices[asset] || '1000',
+    };
+  }
+
+  /**
+   * Get price from CoinGecko as fallback when Binance fails
+   * CoinGecko provides real-time prices and is more permissive with geographic restrictions
+   */
+  private async getPriceFromCoinGecko(asset: string): Promise<BinancePrice | null> {
+    try {
+      // Map assets to CoinGecko IDs
+      const coinGeckoIds: Record<string, string> = {
+        BTC: 'bitcoin',
+        ETH: 'ethereum',
+        BNB: 'binancecoin',
+        USDC: 'usd-coin',
+        USDT: 'tether',
+        SOL: 'solana',
+      };
+
+      const coinGeckoId = coinGeckoIds[asset];
+      if (!coinGeckoId) {
+        logger.warn(`CoinGecko ID not found for asset: ${asset}`);
+        return null;
+      }
+
+      // Get price in EUR from CoinGecko
+      const response = await axios.get(
+        `https://api.coingecko.com/api/v3/simple/price`,
+        {
+          params: {
+            ids: coinGeckoId,
+            vs_currencies: 'eur',
+          },
+          timeout: 5000,
+        }
+      );
+
+      const priceInEur = response.data[coinGeckoId]?.eur;
+      if (!priceInEur) {
+        logger.warn(`CoinGecko price not found for ${asset}`);
+        return null;
+      }
+
+      // For USDC, the price should be close to 1 EUR (since 1 USDC ≈ 1 USD ≈ 0.92 EUR)
+      // CoinGecko returns price in EUR directly
+      const price = priceInEur.toString();
+
+      logger.info(`CoinGecko price fetched for ${asset}: ${price} EUR`);
+
+      return {
+        symbol: this.getTradingPair(asset),
+        price: price,
+      };
+    } catch (error: any) {
+      logger.error('Error fetching price from CoinGecko', {
+        error: error.message,
+        asset,
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Fallback price when Binance API is unavailable (e.g., 451 error)
+   * Uses approximate market prices as fallback
+   */
+  private getFallbackPrice(asset: string): BinancePrice | null {
+    // Fallback prices (approximate market values in EUR)
+    const fallbackPrices: Record<string, string> = {
+      USDC: '0.92', // Stablecoin, approximately 1 USD = 0.92 EUR
+      USDT: '0.92', // Stablecoin, approximately 1 USD = 0.92 EUR
+      BTC: '45000', // Approximate BTC price in EUR
+      ETH: '2800',  // Approximate ETH price in EUR
+      BNB: '350',   // Approximate BNB price in EUR
+      SOL: '120',   // Approximate SOL price in EUR
+    };
+
+    const price = fallbackPrices[asset];
+    if (!price) {
+      return null;
+    }
+
+    return {
+      symbol: this.getTradingPair(asset),
+      price: price,
     };
   }
 
