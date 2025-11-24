@@ -461,7 +461,7 @@ export class AuthController {
         userId = uuidv4();
         
         // Build insert query dynamically based on provider
-        const insertColumns = ['id', 'email', 'email_verified', 'created_at', 'updated_at'];
+        const insertColumns = ['id', 'email', 'email_verified'];
         const insertValues: any[] = [userId, email.toLowerCase(), true];
         
         if (providerColumn === 'google_id') {
