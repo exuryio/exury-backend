@@ -5,6 +5,7 @@
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
+import axios from 'axios';
 import { logger } from '../config/logger';
 import { pool } from '../config/database';
 import { emailService } from '../services/email/email.service';
@@ -261,6 +262,8 @@ export class AuthController {
       logger.info(`   Client ID: ${auth0ClientId ? '***' + auth0ClientId.slice(-4) : 'NOT SET'}`);
       
       // Auth0 requires application/x-www-form-urlencoded for token exchange
+      // Use axios instead of fetch for better DNS resolution in Railway
+      const tokenUrl = `https://${auth0Domain}/oauth/token`;
       const tokenParams = new URLSearchParams({
         grant_type: 'authorization_code',
         client_id: auth0ClientId,
@@ -269,30 +272,23 @@ export class AuthController {
         redirect_uri: redirectUri,
       });
 
-      const tokenResponse = await fetch(`https://${auth0Domain}/oauth/token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: tokenParams.toString(),
-      });
+      logger.info(`📡 Calling Auth0 token endpoint: ${tokenUrl}`);
 
-      logger.info(`📡 Token exchange response status: ${tokenResponse.status}`);
-
-      if (!tokenResponse.ok) {
-        const errorText = await tokenResponse.text().catch(() => 'Unknown error');
-        let error: { error?: string; [key: string]: unknown };
-        try {
-          error = JSON.parse(errorText);
-        } catch {
-          error = { error: errorText || 'Unknown error', raw: errorText };
-        }
-        
+      let tokenResponse;
+      try {
+        tokenResponse = await axios.post(tokenUrl, tokenParams.toString(), {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        });
+      } catch (axiosError: any) {
+        const error = axiosError.response?.data || { error: axiosError.message || 'Unknown error' };
         logger.error('❌ Auth0 token exchange error:', error);
-        logger.error(`   Token response status: ${tokenResponse.status}`);
+        logger.error(`   Token response status: ${axiosError.response?.status || 'N/A'}`);
         logger.error(`   Error details: ${JSON.stringify(error, null, 2)}`);
-        logger.error(`   Response URL: https://${auth0Domain}/oauth/token`);
+        logger.error(`   Response URL: ${tokenUrl}`);
         logger.error(`   Redirect URI used: ${redirectUri}`);
+        logger.error(`   Axios error: ${axiosError.message}`);
         
         // Provide more specific error messages
         let errorMessage = 'Error al intercambiar código por token';
@@ -300,6 +296,8 @@ export class AuthController {
           errorMessage = 'El código de autorización es inválido o ya fue usado. Por favor, intenta iniciar sesión de nuevo.';
         } else if (error.error === 'invalid_client') {
           errorMessage = 'Error de configuración del cliente Auth0.';
+        } else if (axiosError.code === 'ENOTFOUND' || axiosError.message?.includes('Unknown host')) {
+          errorMessage = `Error de DNS: No se pudo resolver el dominio ${auth0Domain}. Verifica la configuración de AUTH0_DOMAIN.`;
         }
         
         return res.status(400).json({ 
@@ -308,7 +306,8 @@ export class AuthController {
         });
       }
 
-      const tokenData = await tokenResponse.json() as { access_token: string; [key: string]: unknown };
+      logger.info(`📡 Token exchange response status: ${tokenResponse.status}`);
+      const tokenData = tokenResponse.data as { access_token: string; [key: string]: unknown };
       const { access_token } = tokenData;
 
       // Get user info from Auth0
