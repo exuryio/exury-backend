@@ -310,24 +310,26 @@ export class AuthController {
       const tokenData = tokenResponse.data as { access_token: string; [key: string]: unknown };
       const { access_token } = tokenData;
 
-      // Get user info from Auth0
-      const userInfoResponse = await fetch(`https://${auth0Domain}/userinfo`, {
-        headers: {
-          Authorization: `Bearer ${access_token}`,
-        },
-      });
-
-      if (!userInfoResponse.ok) {
-        const error = await userInfoResponse.json().catch(() => ({ error: 'Unknown error' })) as { error?: string; [key: string]: unknown };
+      // Get user info from Auth0 using axios
+      const userInfoUrl = `https://${auth0Domain}/userinfo`;
+      let userInfoResponse;
+      try {
+        userInfoResponse = await axios.get(userInfoUrl, {
+          headers: {
+            Authorization: `Bearer ${access_token}`,
+          },
+        });
+      } catch (axiosError: any) {
+        const error = axiosError.response?.data || { error: axiosError.message || 'Unknown error' };
         logger.error('❌ Auth0 userinfo error:', error);
-        logger.error('Userinfo response status:', userInfoResponse.status);
+        logger.error(`Userinfo response status: ${axiosError.response?.status || 'N/A'}`);
         return res.status(400).json({ 
           error: 'Error al obtener información del usuario',
           details: error 
         });
       }
 
-      const userInfo = await userInfoResponse.json() as { email: string; sub: string; name?: string; [key: string]: unknown };
+      const userInfo = userInfoResponse.data as { email: string; sub: string; name?: string; [key: string]: unknown };
       const { email, sub: socialId } = userInfo;
 
       if (!email) {
