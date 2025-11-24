@@ -10,6 +10,9 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { logger } from './config/logger';
 import routes from './routes';
+import { pool } from './config/database';
+import fs from 'fs';
+import path from 'path';
 
 console.log('✅ All imports loaded');
 
@@ -101,6 +104,59 @@ app.use((req: Request, res: Response) => {
   });
 });
 console.log('✅ Error handlers configured');
+
+// Auto-run migrations on startup (only if tables don't exist)
+async function runMigrationsIfNeeded() {
+  try {
+    // Check if users table exists
+    const result = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'users'
+      );
+    `);
+    
+    const usersTableExists = result.rows[0].exists;
+    
+    if (usersTableExists) {
+      console.log('✅ Database tables already exist, skipping migrations');
+      return;
+    }
+    
+    console.log('📊 Database tables not found, running migrations...');
+    
+    const migrationsDir = path.join(__dirname, '..', 'migrations');
+    const migrationFiles = [
+      '001_initial_schema.sql',
+      '002_add_email_verification.sql',
+      '003_add_apple_facebook_ids.sql',
+    ];
+    
+    for (const file of migrationFiles) {
+      const filePath = path.join(migrationsDir, file);
+      if (fs.existsSync(filePath)) {
+        console.log(`📊 Running migration ${file}...`);
+        const sql = fs.readFileSync(filePath, 'utf8');
+        await pool.query(sql);
+        console.log(`✅ Migration ${file} completed`);
+      }
+    }
+    
+    console.log('🎉 All migrations completed successfully!');
+  } catch (error) {
+    console.error('⚠️  Migration error (continuing anyway):', error instanceof Error ? error.message : String(error));
+    // Don't fail startup if migrations fail - might be permission issues or already run
+  }
+}
+
+// Run migrations before starting server
+runMigrationsIfNeeded().then(() => {
+  console.log('✅ Migration check completed');
+}).catch((error) => {
+  console.error('⚠️  Migration check failed:', error);
+  // Continue anyway - server might work without migrations
+});
 
 // Handle uncaught errors BEFORE starting server
 process.on('uncaughtException', (error: Error) => {
