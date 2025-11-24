@@ -260,18 +260,21 @@ export class AuthController {
       logger.info(`   Redirect URI: ${redirectUri}`);
       logger.info(`   Client ID: ${auth0ClientId ? '***' + auth0ClientId.slice(-4) : 'NOT SET'}`);
       
+      // Auth0 requires application/x-www-form-urlencoded for token exchange
+      const tokenParams = new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: auth0ClientId,
+        client_secret: auth0ClientSecret,
+        code,
+        redirect_uri: redirectUri,
+      });
+
       const tokenResponse = await fetch(`https://${auth0Domain}/oauth/token`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: JSON.stringify({
-          grant_type: 'authorization_code',
-          client_id: auth0ClientId,
-          client_secret: auth0ClientSecret,
-          code,
-          redirect_uri: redirectUri,
-        }),
+        body: tokenParams.toString(),
       });
 
       logger.info(`📡 Token exchange response status: ${tokenResponse.status}`);
