@@ -280,10 +280,19 @@ export class AuthController {
       logger.info(`📡 Token exchange response status: ${tokenResponse.status}`);
 
       if (!tokenResponse.ok) {
-        const error = await tokenResponse.json().catch(() => ({ error: 'Unknown error' })) as { error?: string; [key: string]: unknown };
+        const errorText = await tokenResponse.text().catch(() => 'Unknown error');
+        let error: { error?: string; [key: string]: unknown };
+        try {
+          error = JSON.parse(errorText);
+        } catch {
+          error = { error: errorText || 'Unknown error', raw: errorText };
+        }
+        
         logger.error('❌ Auth0 token exchange error:', error);
-        logger.error('   Token response status:', tokenResponse.status);
-        logger.error('   Error details:', JSON.stringify(error, null, 2));
+        logger.error(`   Token response status: ${tokenResponse.status}`);
+        logger.error(`   Error details: ${JSON.stringify(error, null, 2)}`);
+        logger.error(`   Response URL: https://${auth0Domain}/oauth/token`);
+        logger.error(`   Redirect URI used: ${redirectUri}`);
         
         // Provide more specific error messages
         let errorMessage = 'Error al intercambiar código por token';
