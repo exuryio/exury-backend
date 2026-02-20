@@ -53,6 +53,17 @@ class QuoteRepository {
     }
   }
 
+  private toDbKey(key: keyof Quote): string {
+    const map: Record<string, string> = {
+      cryptoPrice: 'crypto_price',
+      exchangeRate: 'exchange_rate',
+      cryptoAmount: 'crypto_amount',
+      expiresAt: 'expires_at',
+      createdAt: 'created_at',
+    };
+    return map[key as string] ?? key;
+  }
+
   async update(id: string, updates: Partial<Quote>): Promise<Quote> {
     const fields: string[] = [];
     const values: any[] = [];
@@ -60,7 +71,8 @@ class QuoteRepository {
 
     Object.keys(updates).forEach((key) => {
       if (key !== 'id' && updates[key as keyof Quote] !== undefined) {
-        fields.push(`${key} = $${paramCount}`);
+        const dbKey = this.toDbKey(key as keyof Quote);
+        fields.push(`${dbKey} = $${paramCount}`);
         values.push(updates[key as keyof Quote]);
         paramCount++;
       }

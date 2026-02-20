@@ -1,12 +1,13 @@
 /**
  * Order Controller
  * Handles order-related API requests.
- * PayDo solo se usa en el webhook cuando el banco avisa que llegó un pago; crear orden no depende de PayDo.
+ * PayDo se usa solo en el webhook cuando el banco avisa; crear orden no depende de PayDo.
  */
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { orderRepository } from '../repositories/order.repository';
 import { pricingService } from '../services/pricing/pricing.service';
+import { getOrCreateAnonymousUserId } from '../repositories/user.repository';
 import { OrderStatus } from '../types';
 import { logger } from '../config/logger';
 import { pool } from '../config/database';
@@ -15,14 +16,14 @@ export class OrderController {
   /**
    * POST /v1/orders
    * Crear orden: recibe quote_id, guarda la orden y devuelve id al frontend.
-   * PayDo (aviso del banco) es aparte, vía webhook cuando llega el pago.
    */
   async createOrder(req: Request, res: Response): Promise<void> {
     const client = await pool.connect();
 
     try {
       const { quote_id } = req.body;
-      const userId = (req as any).user?.id || 'test-user-id'; // TODO: auth middleware
+      const userId =
+        (req as any).user?.id || (await getOrCreateAnonymousUserId());
 
       if (!quote_id) {
         res.status(400).json({ error: 'quote_id is required' });
@@ -79,12 +80,13 @@ export class OrderController {
 
   /**
    * GET /v1/orders/:id
-   * Devuelve la orden (importe, estado, referencia). IBAN/referencia reales cuando más adelante integres PayDo.
+   * Devuelve la orden (importe, estado, referencia).
    */
   async getOrder(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const userId = (req as any).user?.id || 'test-user-id'; // TODO: auth middleware
+      const userId =
+        (req as any).user?.id || (await getOrCreateAnonymousUserId());
 
       const order = await orderRepository.findById(id);
       if (!order) {
@@ -130,7 +132,8 @@ export class OrderController {
    */
   async getUserOrders(req: Request, res: Response): Promise<void> {
     try {
-      const userId = (req as any).user?.id || 'test-user-id'; // TODO: Get from auth middleware
+      const userId =
+        (req as any).user?.id || (await getOrCreateAnonymousUserId());
 
       const orders = await orderRepository.findByUserId(userId);
 
