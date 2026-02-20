@@ -12,6 +12,11 @@ import { OrderStatus } from '../types';
 import { logger } from '../config/logger';
 import { pool } from '../config/database';
 
+/** Referencia obligatoria: siempre 5 dígitos (ej. 00001, 00005) */
+function formatReference(orderNumber: number): string {
+  return String(orderNumber).padStart(5, '0');
+}
+
 export class OrderController {
   /**
    * POST /v1/orders
@@ -66,7 +71,7 @@ export class OrderController {
         id: orderId,
         order_id: orderId,
         order_number: orderNumber,
-        reference: String(orderNumber),
+        reference: formatReference(orderNumber),
         status: OrderStatus.QUOTE_LOCKED,
       });
     } catch (error: any) {
@@ -102,6 +107,9 @@ export class OrderController {
       }
 
       const orderNumber = order.orderNumber;
+      if (orderNumber === 0) {
+        logger.warn('order_number is 0: run migration 005_order_number.sql in production', { orderId: order.id });
+      }
       res.json({
         id: order.id,
         order_id: order.id,
@@ -116,7 +124,7 @@ export class OrderController {
         exchange_rate: order.exchangeRate,
         fee: order.fee,
         status: order.status,
-        reference: String(orderNumber),
+        reference: formatReference(orderNumber),
         iban: null,
         payment_id: order.paymentId ?? null,
         created_at: order.createdAt,

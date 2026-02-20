@@ -4,6 +4,9 @@
  * This script reads SQL files and executes them in order
  */
 
+// Permitir conexión SSL a Railway (certificado auto-firmado)
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
@@ -18,10 +21,12 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
-// Create database connection
+// Create database connection (Railway usa certificado que Node no verifica por defecto)
 const pool = new Pool({
   connectionString: databaseUrl,
-  ssl: databaseUrl.includes('railway') ? { rejectUnauthorized: false } : false,
+  ssl: databaseUrl.includes('railway') || databaseUrl.includes('rlwy.net')
+    ? { rejectUnauthorized: false }
+    : false,
 });
 
 const migrationsDir = path.join(__dirname, '..', 'migrations');
@@ -29,6 +34,8 @@ const migrationFiles = [
   '001_initial_schema.sql',
   '002_add_email_verification.sql',
   '003_add_apple_facebook_ids.sql',
+  '004_anonymous_user.sql',
+  '005_order_number.sql',
 ];
 
 async function runMigrations() {
