@@ -1,8 +1,9 @@
 [phases.setup]
 nixPkgs = ["nodejs_18"]
 
+# Install devDependencies so TypeScript (tsc) is available for the build
 [phases.install]
-cmds = ["npm ci"]
+cmds = ["NODE_ENV=development npm ci"]
 
 [phases.build]
 cmds = ["npm run build"]
