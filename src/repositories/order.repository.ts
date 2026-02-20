@@ -7,7 +7,7 @@ import { Order, OrderStatus } from '../types';
 import { logger } from '../config/logger';
 
 class OrderRepository {
-  async create(order: Omit<Order, 'createdAt' | 'updatedAt'>): Promise<Order> {
+  async create(order: Omit<Order, 'createdAt' | 'updatedAt' | 'orderNumber'>): Promise<Order> {
     const query = `
       INSERT INTO orders (
         id, user_id, quote_id, type, base, asset, fiat_amount,
@@ -73,8 +73,9 @@ class OrderRepository {
 
     Object.keys(updates).forEach((key) => {
       if (key !== 'id' && updates[key as keyof Order] !== undefined) {
-        const dbKey = key === 'userId' ? 'user_id' : 
+        const dbKey = key === 'userId' ? 'user_id' :
                      key === 'quoteId' ? 'quote_id' :
+                     key === 'orderNumber' ? 'order_number' :
                      key === 'fiatAmount' ? 'fiat_amount' :
                      key === 'cryptoAmount' ? 'crypto_amount' :
                      key === 'exchangeRate' ? 'exchange_rate' :
@@ -107,6 +108,7 @@ class OrderRepository {
   private mapRowToOrder(row: any): Order {
     return {
       id: row.id,
+      orderNumber: row.order_number != null ? Number(row.order_number) : 0,
       userId: row.user_id,
       quoteId: row.quote_id,
       type: row.type,

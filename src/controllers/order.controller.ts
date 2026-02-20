@@ -45,7 +45,7 @@ export class OrderController {
       await client.query('BEGIN');
 
       const orderId = uuidv4();
-      await orderRepository.create({
+      const order = await orderRepository.create({
         id: orderId,
         userId,
         quoteId: quote_id,
@@ -61,9 +61,12 @@ export class OrderController {
 
       await client.query('COMMIT');
 
+      const orderNumber = order.orderNumber;
       res.status(201).json({
         id: orderId,
         order_id: orderId,
+        order_number: orderNumber,
+        reference: String(orderNumber),
         status: OrderStatus.QUOTE_LOCKED,
       });
     } catch (error: any) {
@@ -98,9 +101,11 @@ export class OrderController {
         return;
       }
 
+      const orderNumber = order.orderNumber;
       res.json({
         id: order.id,
         order_id: order.id,
+        order_number: orderNumber,
         quote_id: order.quoteId,
         type: order.type,
         base: order.base,
@@ -111,7 +116,7 @@ export class OrderController {
         exchange_rate: order.exchangeRate,
         fee: order.fee,
         status: order.status,
-        reference: order.id,
+        reference: String(orderNumber),
         iban: null,
         payment_id: order.paymentId ?? null,
         created_at: order.createdAt,

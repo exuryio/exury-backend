@@ -68,6 +68,7 @@ export interface LockQuoteRequest {
 
 export interface Order {
   id: string;
+  orderNumber: number; // Número de orden (máx. 10 dígitos) = referencia obligatoria
   userId: string;
   quoteId: string;
   type: 'buy' | 'sell';

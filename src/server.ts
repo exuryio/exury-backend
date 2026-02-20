@@ -132,6 +132,7 @@ async function runMigrationsIfNeeded() {
       '002_add_email_verification.sql',
       '003_add_apple_facebook_ids.sql',
       '004_anonymous_user.sql',
+      '005_order_number.sql',
     ];
     
     for (const file of migrationFiles) {
