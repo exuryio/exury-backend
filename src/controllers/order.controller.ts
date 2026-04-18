@@ -26,12 +26,18 @@ export class OrderController {
     const client = await pool.connect();
 
     try {
-      const { quote_id } = req.body;
+      const { quote_id, type, amount_eur, amount_crypto } = req.body;
       const userId =
         (req as any).user?.id || (await getOrCreateAnonymousUserId());
 
       if (!quote_id) {
         res.status(400).json({ error: 'quote_id is required' });
+        return;
+      }
+
+      const orderType = type === 'sell' ? 'sell' : 'buy';
+      if (type !== undefined && type !== 'buy' && type !== 'sell') {
+        res.status(400).json({ error: "type must be 'buy' or 'sell'" });
         return;
       }
 
@@ -47,6 +53,20 @@ export class OrderController {
         return;
       }
 
+      const requestedEur = Number(amount_eur);
+      const requestedCrypto = Number(amount_crypto);
+      const hasValidSellAmounts =
+        orderType === 'sell' &&
+        Number.isFinite(requestedEur) &&
+        Number.isFinite(requestedCrypto) &&
+        requestedEur > 0 &&
+        requestedCrypto > 0;
+
+      const fiatAmount = hasValidSellAmounts ? requestedEur : quote.amount;
+      const cryptoAmount = hasValidSellAmounts ? requestedCrypto : quote.cryptoAmount;
+      const exchangeRate = cryptoAmount > 0 ? fiatAmount / cryptoAmount : quote.exchangeRate;
+      const fee = hasValidSellAmounts ? fiatAmount * 0.005 : quote.fee;
+
       await client.query('BEGIN');
 
       const orderId = uuidv4();
@@ -54,13 +74,13 @@ export class OrderController {
         id: orderId,
         userId,
         quoteId: quote_id,
-        type: 'buy',
+        type: orderType,
         base: quote.base,
         asset: quote.asset,
-        fiatAmount: quote.amount,
-        cryptoAmount: quote.cryptoAmount,
-        exchangeRate: quote.exchangeRate,
-        fee: quote.fee,
+        fiatAmount,
+        cryptoAmount,
+        exchangeRate,
+        fee,
         status: OrderStatus.QUOTE_LOCKED,
       });
 
