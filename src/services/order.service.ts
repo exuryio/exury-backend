@@ -27,11 +27,10 @@ class OrderService {
         throw new Error(`Order is not in payment_received status: ${order.status}`);
       }
 
-      // Execute Binance buy order
-      const binanceOrder = await binanceService.executeBuy(
-        order.asset,
-        order.fiatAmount
-      );
+      const isSellOrder = order.type === 'sell';
+      const binanceOrder = isSellOrder
+        ? await binanceService.executeSell(order.asset, order.cryptoAmount)
+        : await binanceService.executeBuy(order.asset, order.fiatAmount);
 
       // Update order with Binance order ID
       await orderRepository.update(order.id, {
@@ -39,13 +38,17 @@ class OrderService {
         status: OrderStatus.COMPLETED,
       });
 
-      // Create transaction for crypto purchase
+      const transactionType = isSellOrder
+        ? TransactionType.SELL
+        : TransactionType.BUY;
+
+      // Create transaction for crypto trade
       const cryptoTransactionId = uuidv4();
       await transactionRepository.create({
         id: cryptoTransactionId,
         userId: order.userId,
         orderId: order.id,
-        type: TransactionType.BUY,
+        type: transactionType,
         asset: order.asset,
         amount: order.cryptoAmount,
         status: PaymentStatus.COMPLETED,
@@ -58,7 +61,7 @@ class OrderService {
         cryptoTransactionId,
         order.asset,
         order.cryptoAmount,
-        TransactionType.BUY
+        transactionType
       );
 
       logger.info('Order processed successfully', {
