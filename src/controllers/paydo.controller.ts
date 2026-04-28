@@ -41,11 +41,9 @@ export class PayDoController {
       await client.query('BEGIN');
 
       // Find transaction by PayDo payment ID
-      const transaction = await transactionRepository.findById(
-        data.reference || ''
-      );
+      const txRow = await transactionRepository.findById(data.reference || '');
 
-      if (!transaction) {
+      if (!txRow) {
         // Try to find by PayDo transaction ID
         const transactions = await pool.query(
           'SELECT * FROM transactions WHERE paydo_transaction_id = $1',
@@ -61,14 +59,25 @@ export class PayDoController {
           return;
         }
 
-        // Process the transaction
+        // Process the transaction (fila SQL: order_id, user_id en snake_case)
         await this.processPayment(
           transactions.rows[0],
           data.status,
           client
         );
       } else {
-        await this.processPayment(transaction, data.status, client);
+        // Repositorio devuelve camelCase; normalizamos para processPayment
+        await this.processPayment(
+          {
+            id: txRow.id,
+            order_id: txRow.orderId,
+            user_id: txRow.userId,
+            type: txRow.type,
+            amount: txRow.amount,
+          },
+          data.status,
+          client
+        );
       }
 
       await client.query('COMMIT');
@@ -108,42 +117,75 @@ export class PayDoController {
       status: newStatus,
     });
 
-    // If payment completed, process the order
-    if (newStatus === PaymentStatus.COMPLETED && transaction.order_id) {
-      const order = await orderRepository.findById(transaction.order_id);
+    const orderId = transaction.order_id ?? transaction.orderId;
+    const userId = transaction.user_id ?? transaction.userId;
+    const txType = String(transaction.type || '').toLowerCase();
 
-      if (order && order.status === OrderStatus.PAYMENT_PENDING) {
+    // If payment completed, process the order
+    if (newStatus !== PaymentStatus.COMPLETED || !orderId) {
+      return;
+    }
+
+    const order = await orderRepository.findById(orderId);
+    if (!order) {
+      return;
+    }
+
+    // Venta (sell): retiro SEPA completado → orden cerrada (crypto ya liquidado en executeSellPayout)
+    if (
+      order.type === 'sell' &&
+      (txType === 'withdrawal' || txType === TransactionType.WITHDRAWAL)
+    ) {
+      if (order.status === OrderStatus.PAYMENT_PENDING) {
         // Update order status
         await orderRepository.update(order.id, {
-          status: OrderStatus.PAYMENT_RECEIVED,
+          status: OrderStatus.COMPLETED,
         });
+        // No ledger EUR: el SEPA va al banco del usuario; el SELL crypto ya está en ledger
+        logger.info('Sell order completed after PayDo withdrawal', {
+          orderId: order.id,
+          transactionId: transaction.id,
+        });
+      }
+      return;
+    }
 
-        // Create ledger entry for EUR deposit
-        await ledgerService.createEntry(
-          transaction.user_id,
-          transaction.id,
-          'EUR',
-          transaction.amount,
-          TransactionType.DEPOSIT
-        );
+    // Compra (buy): depósito EUR recibido → ledger + Binance buy (no aplicar a retiros)
+    if (
+      order.type === 'buy' &&
+      order.status === OrderStatus.PAYMENT_PENDING &&
+      txType !== 'withdrawal' &&
+      txType !== TransactionType.WITHDRAWAL
+    ) {
+      // Update order status
+      await orderRepository.update(order.id, {
+        status: OrderStatus.PAYMENT_RECEIVED,
+      });
 
-        // Execute Binance buy order using order service
-        try {
-          const { orderService } = await import('../services/order.service');
-          await orderService.processOrderAfterPayment(order.id);
-        } catch (error: any) {
-          logger.error('Error executing Binance order', {
-            error: error.message,
-            orderId: order.id,
-          });
-          await orderRepository.update(order.id, {
-            status: OrderStatus.FAILED,
-          });
-        }
+      // Create ledger entry for EUR deposit
+      await ledgerService.createEntry(
+        userId,
+        transaction.id,
+        'EUR',
+        Number(transaction.amount),
+        TransactionType.DEPOSIT
+      );
+
+      // Execute Binance buy order using order service
+      try {
+        const { orderService } = await import('../services/order.service');
+        await orderService.processOrderAfterPayment(order.id);
+      } catch (error: any) {
+        logger.error('Error executing Binance order', {
+          error: error.message,
+          orderId: order.id,
+        });
+        await orderRepository.update(order.id, {
+          status: OrderStatus.FAILED,
+        });
       }
     }
   }
 }
 
 export const paydoController = new PayDoController();
-

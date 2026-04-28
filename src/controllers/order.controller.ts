@@ -1,20 +1,58 @@
 /**
  * Order Controller
  * Handles order-related API requests.
- * PayDo se usa solo en el webhook cuando el banco avisa; crear orden no depende de PayDo.
+ * PayDo: crear orden no llama a PayDo. Retiro SEPA (venta) se inicia en POST /orders/:id/sell/payout.
  */
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { orderRepository } from '../repositories/order.repository';
 import { pricingService } from '../services/pricing/pricing.service';
+import { orderService } from '../services/order.service';
 import { getOrCreateAnonymousUserId } from '../repositories/user.repository';
-import { OrderStatus } from '../types';
+import { OrderStatus, Order } from '../types';
 import { logger } from '../config/logger';
 import { pool } from '../config/database';
+import {
+  bankAccountRepository,
+  hashIban,
+  normalizeIban,
+} from '../repositories/bank-account.repository';
+import { userWalletRepository } from '../repositories/user-wallet.repository';
 
 /** Referencia obligatoria: siempre 5 dígitos (ej. 00001, 00005) */
 function formatReference(orderNumber: number): string {
   return String(orderNumber).padStart(5, '0');
+}
+
+/**
+ * Sanea una orden antes de devolverla al cliente.
+ * - Quita información sensible/PII: `iban` (texto plano) y `fee` (coste interno).
+ * - Mantiene un flag `has_iban` para que la UI sepa que ya hay un IBAN registrado
+ *   sin necesidad de exponerlo. El IBAN sigue viviendo en DB para el operador.
+ * Cualquier endpoint que devuelva órdenes al cliente debe pasar por aquí.
+ */
+function sanitizeOrderForClient(order: Order, orderNumber: number) {
+  return {
+    id: order.id,
+    order_id: order.id,
+    order_number: orderNumber,
+    quote_id: order.quoteId,
+    type: order.type,
+    base: order.base,
+    asset: order.asset,
+    fiat_amount: order.fiatAmount,
+    amount: order.fiatAmount,
+    crypto_amount: order.cryptoAmount,
+    exchange_rate: order.exchangeRate,
+    status: order.status,
+    reference: formatReference(orderNumber),
+    has_iban: Boolean(order.iban),
+    bank_account_id: order.bankAccountId ?? null,
+    user_wallet_id: order.userWalletId ?? null,
+    payment_id: order.paymentId ?? null,
+    created_at: order.createdAt,
+    updated_at: order.updatedAt,
+  };
 }
 
 export class OrderController {
@@ -26,9 +64,21 @@ export class OrderController {
     const client = await pool.connect();
 
     try {
-      const { quote_id, type, amount_eur, amount_crypto } = req.body;
-      const userId =
-        (req as any).user?.id || (await getOrCreateAnonymousUserId());
+      const {
+        quote_id,
+        type,
+        amount_eur,
+        amount_crypto,
+        // Sell: el usuario manda IBAN en claro (para poder pagar) y/o un id ya guardado.
+        iban: rawIban,
+        bank_account_id,
+        // Buy: wallet de destino ya guardada por el usuario.
+        user_wallet_id,
+        // Buy: alternativa a user_wallet_id — persistimos en caliente.
+        wallet_address,
+        wallet_network,
+      } = req.body;
+      const userId = (req as any).user?.id || (await getOrCreateAnonymousUserId());
 
       if (!quote_id) {
         res.status(400).json({ error: 'quote_id is required' });
@@ -67,6 +117,53 @@ export class OrderController {
       const exchangeRate = cryptoAmount > 0 ? fiatAmount / cryptoAmount : quote.exchangeRate;
       const fee = hasValidSellAmounts ? fiatAmount * 0.005 : quote.fee;
 
+      // --- Resolución de bank_account_id / user_wallet_id según el tipo -----
+      let bankAccountId: string | null = null;
+      let userWalletId: string | null = null;
+      let ibanForOrder: string | null = null;
+
+      if (orderType === 'sell') {
+        if (typeof rawIban === 'string' && rawIban.trim().length > 0) {
+          ibanForOrder = normalizeIban(rawIban);
+          // Upsert el hash para dejar constancia de "cuenta verificada por el user".
+          const up = await bankAccountRepository.upsert(userId, ibanForOrder, null);
+          bankAccountId = up.id;
+        } else if (typeof bank_account_id === 'string' && bank_account_id.length > 0) {
+          const acc = await bankAccountRepository.findByIdForUser(bank_account_id, userId);
+          if (!acc) {
+            res.status(400).json({ error: 'bank_account_id does not belong to user' });
+            return;
+          }
+          bankAccountId = acc.id;
+          // Al no guardar el IBAN en bank_accounts, no podemos rellenar orders.iban aquí.
+          // Quedará null y el cliente deberá pasarlo en /sell/payout.
+        }
+      }
+
+      if (orderType === 'buy') {
+        if (typeof user_wallet_id === 'string' && user_wallet_id.length > 0) {
+          const w = await userWalletRepository.findByIdForUser(user_wallet_id, userId);
+          if (!w) {
+            res.status(400).json({ error: 'user_wallet_id does not belong to user' });
+            return;
+          }
+          userWalletId = w.id;
+        } else if (
+          typeof wallet_address === 'string' &&
+          wallet_address.trim().length > 0 &&
+          typeof wallet_network === 'string' &&
+          wallet_network.trim().length > 0
+        ) {
+          const up = await userWalletRepository.upsert(
+            userId,
+            wallet_address,
+            wallet_network,
+            null
+          );
+          userWalletId = up.id;
+        }
+      }
+
       await client.query('BEGIN');
 
       const orderId = uuidv4();
@@ -82,6 +179,9 @@ export class OrderController {
         exchangeRate,
         fee,
         status: OrderStatus.QUOTE_LOCKED,
+        iban: ibanForOrder,
+        bankAccountId,
+        userWalletId,
       });
 
       await client.query('COMMIT');
@@ -110,11 +210,14 @@ export class OrderController {
    * GET /v1/orders/:id
    * Devuelve la orden (importe, estado, referencia).
    */
-  async getOrder(req: Request, res: Response): Promise<void> {
+  async getOrder(
+    req: Request,
+    res: Response,
+    expectedType?: 'buy' | 'sell'
+  ): Promise<void> {
     try {
       const { id } = req.params;
-      const userId =
-        (req as any).user?.id || (await getOrCreateAnonymousUserId());
+      const userId = (req as any).user?.id || (await getOrCreateAnonymousUserId());
 
       const order = await orderRepository.findById(id);
       if (!order) {
@@ -125,31 +228,19 @@ export class OrderController {
         res.status(403).json({ error: 'Access denied' });
         return;
       }
+      // Si la ruta usada declara un tipo (/orders/sell/:id o /orders/buy/:id)
+      // y la orden no coincide, devolvemos 404 para no filtrar la existencia
+      // de órdenes de otro tipo bajo la misma URL.
+      if (expectedType && order.type !== expectedType) {
+        res.status(404).json({ error: 'Order not found' });
+        return;
+      }
 
       const orderNumber = order.orderNumber;
       if (orderNumber === 0) {
         logger.warn('order_number is 0: run migration 005_order_number.sql in production', { orderId: order.id });
       }
-      res.json({
-        id: order.id,
-        order_id: order.id,
-        order_number: orderNumber,
-        quote_id: order.quoteId,
-        type: order.type,
-        base: order.base,
-        asset: order.asset,
-        fiat_amount: order.fiatAmount,
-        amount: order.fiatAmount,
-        crypto_amount: order.cryptoAmount,
-        exchange_rate: order.exchangeRate,
-        fee: order.fee,
-        status: order.status,
-        reference: formatReference(orderNumber),
-        iban: null,
-        payment_id: order.paymentId ?? null,
-        created_at: order.createdAt,
-        updated_at: order.updatedAt,
-      });
+      res.json(sanitizeOrderForClient(order, orderNumber));
     } catch (error: any) {
       logger.error('Error getting order', { error: error.message });
       res.status(500).json({
@@ -165,18 +256,85 @@ export class OrderController {
    */
   async getUserOrders(req: Request, res: Response): Promise<void> {
     try {
-      const userId =
-        (req as any).user?.id || (await getOrCreateAnonymousUserId());
+      const userId = (req as any).user?.id || (await getOrCreateAnonymousUserId());
 
       const orders = await orderRepository.findByUserId(userId);
 
-      res.json({ orders });
+      // Saneamos cada orden para que el listado tampoco filtre IBAN/fee.
+      res.json({
+        orders: orders.map((o) => sanitizeOrderForClient(o, o.orderNumber)),
+      });
     } catch (error: any) {
       logger.error('Error getting user orders', { error: error.message });
       res.status(500).json({
         error: 'Failed to get orders',
         message: error.message,
       });
+    }
+  }
+
+  /**
+   * POST /v1/orders/:id/sell/payout
+   * Tras verificar depósito crypto en custodia: ejecuta venta en Binance y retiro SEPA vía PayDo.
+   */
+  async initiateSellPayout(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { iban: rawIban } = req.body as { iban?: string };
+      const userId = (req as any).user?.id || (await getOrCreateAnonymousUserId());
+
+      // Si la orden ya trae IBAN persistido (se guardó al crearla), lo reutilizamos
+      // cuando el cliente no envía uno nuevo. Evita pedir IBAN dos veces en el mismo flujo.
+      const existing = await orderRepository.findById(id);
+      if (existing && existing.userId !== userId) {
+        res.status(403).json({ error: 'Access denied' });
+        return;
+      }
+
+      const effectiveIban =
+        typeof rawIban === 'string' && rawIban.trim().length > 0
+          ? normalizeIban(rawIban)
+          : existing?.iban || null;
+
+      if (!effectiveIban) {
+        res.status(400).json({ error: 'iban is required' });
+        return;
+      }
+
+      // Registrar (upsert) hash en bank_accounts: queremos huella de que este user verificó este IBAN.
+      try {
+        await bankAccountRepository.upsert(userId, effectiveIban, null);
+      } catch (hashErr: any) {
+        // No bloqueamos el payout si el upsert falla — es secundario al flujo de pago.
+        logger.warn('No se pudo upsertar bank_account (hash) en payout', {
+          error: hashErr?.message,
+          ibanHash: hashIban(effectiveIban),
+        });
+      }
+
+      // Persistir el iban en la orden si todavía no tenía uno (p. ej., viene de bank_account_id).
+      if (existing && !existing.iban) {
+        try {
+          await orderRepository.update(id, { iban: effectiveIban });
+        } catch (persistErr: any) {
+          logger.warn('No se pudo persistir iban en orders', { error: persistErr?.message });
+        }
+      }
+
+      const result = await orderService.executeSellPayout(id, userId, effectiveIban);
+      res.status(200).json(result);
+    } catch (error: any) {
+      const msg = error?.message || 'Failed to initiate sell payout';
+      logger.error('Error initiating sell payout', { error: msg });
+      if (msg.includes('Order not found')) {
+        res.status(404).json({ error: msg });
+        return;
+      }
+      if (msg.includes('Access denied')) {
+        res.status(403).json({ error: msg });
+        return;
+      }
+      res.status(400).json({ error: msg });
     }
   }
 }

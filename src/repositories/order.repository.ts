@@ -8,11 +8,17 @@ import { logger } from '../config/logger';
 
 class OrderRepository {
   async create(order: Omit<Order, 'createdAt' | 'updatedAt' | 'orderNumber'>): Promise<Order> {
+    // Columnas añadidas en la migración 006:
+    //   - iban: IBAN en claro de la venta concreta (null en buy). Vive aquí porque
+    //     bank_accounts sólo guarda hash(iban); el operador necesita el IBAN para el SEPA.
+    //   - bank_account_id: FK a bank_accounts cuando la venta usó una cuenta verificada.
+    //   - user_wallet_id:  FK a user_wallets cuando la compra usó una wallet guardada.
     const query = `
       INSERT INTO orders (
         id, user_id, quote_id, type, base, asset, fiat_amount,
-        crypto_amount, exchange_rate, fee, status, payment_id, binance_order_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        crypto_amount, exchange_rate, fee, status, payment_id, binance_order_id,
+        iban, bank_account_id, user_wallet_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *
     `;
 
@@ -30,6 +36,9 @@ class OrderRepository {
       order.status,
       order.paymentId || null,
       order.binanceOrderId || null,
+      order.iban || null,
+      order.bankAccountId || null,
+      order.userWalletId || null,
     ];
 
     try {
@@ -81,6 +90,8 @@ class OrderRepository {
                      key === 'exchangeRate' ? 'exchange_rate' :
                      key === 'paymentId' ? 'payment_id' :
                      key === 'binanceOrderId' ? 'binance_order_id' :
+                     key === 'bankAccountId' ? 'bank_account_id' :
+                     key === 'userWalletId' ? 'user_wallet_id' :
                      key === 'createdAt' ? 'created_at' :
                      key === 'updatedAt' ? 'updated_at' : key;
         fields.push(`${dbKey} = $${paramCount}`);
@@ -121,6 +132,9 @@ class OrderRepository {
       status: row.status as OrderStatus,
       paymentId: row.payment_id,
       binanceOrderId: row.binance_order_id,
+      iban: row.iban ?? null,
+      bankAccountId: row.bank_account_id ?? null,
+      userWalletId: row.user_wallet_id ?? null,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
     };
