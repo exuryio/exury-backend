@@ -58,7 +58,7 @@ router.get('/users/me/balances/:asset', (req, res) =>
   balanceController.getBalance(req, res)
 );
 
-// Bank accounts del usuario (sell flow). El IBAN no se devuelve nunca: sólo el hash vive en DB.
+// Bank accounts del usuario (sell flow). El IBAN no se devuelve: hash + banco + titular en DB.
 router.get('/users/me/bank-accounts', (req, res) =>
   bankAccountController.list(req, res)
 );

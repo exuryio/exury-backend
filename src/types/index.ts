@@ -81,9 +81,9 @@ export interface Order {
   status: OrderStatus;
   paymentId?: string;
   binanceOrderId?: string;
-  // IBAN destino SEPA (sell). Se guarda sólo en la orden correspondiente.
+  // IBAN destino SEPA (sell): texto plano para operador/PayDo; no duplica bank_accounts (ahí va hash + banco + titular).
   iban?: string | null;
-  // FKs opcionales a los registros persistidos del usuario (sell→bankAccountId, buy→userWalletId).
+  // sell → cuenta bancaria guardada del usuario; buy → wallet guardada.
   bankAccountId?: string | null;
   userWalletId?: string | null;
   createdAt: Date;

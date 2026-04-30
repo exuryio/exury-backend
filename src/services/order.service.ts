@@ -1,9 +1,11 @@
 /**
  * Order Service
- * Business logic for order processing
+ * Business logic for order processing.
+ *
+ * executeSellPayout valida el IBAN con las mismas reglas que cuentas bancarias y órdenes (isValidIban),
+ * para que PayDo no reciba un formato que ya hubiésemos rechazado antes en HTTP.
  */
 import { orderRepository } from '../repositories/order.repository';
-// Removed unused import
 import { binanceService } from './binance/binance.service';
 import { ledgerService } from './ledger/ledger.service';
 import { transactionRepository } from '../repositories/transaction.repository';
@@ -11,14 +13,7 @@ import { paydoService } from './paydo/paydo.service';
 import { OrderStatus, TransactionType, PaymentStatus } from '../types';
 import { logger } from '../config/logger';
 import { v4 as uuidv4 } from 'uuid';
-
-function normalizeIban(iban: string): string {
-  return iban.replace(/\s+/g, '').toUpperCase();
-}
-
-function isValidIban(iban: string): boolean {
-  return /^[A-Z]{2}\d{13,32}$/.test(iban);
-}
+import { normalizeIban, isValidIban } from '../repositories/bank-account.repository';
 
 class OrderService {
   /**
@@ -101,6 +96,7 @@ class OrderService {
     crypto_transaction_id: string;
     binance_order_id: string;
   }> {
+    // El controller ya validó y persistió; repetimos aquí como red de seguridad antes de PayDo.
     const iban = normalizeIban(ibanRaw.trim());
     if (!isValidIban(iban)) {
       throw new Error('Invalid IBAN');

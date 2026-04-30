@@ -9,10 +9,10 @@ import { logger } from '../config/logger';
 class OrderRepository {
   async create(order: Omit<Order, 'createdAt' | 'updatedAt' | 'orderNumber'>): Promise<Order> {
     // Columnas añadidas en la migración 006:
-    //   - iban: IBAN en claro de la venta concreta (null en buy). Vive aquí porque
-    //     bank_accounts sólo guarda hash(iban); el operador necesita el IBAN para el SEPA.
-    //   - bank_account_id: FK a bank_accounts cuando la venta usó una cuenta verificada.
-    //   - user_wallet_id:  FK a user_wallets cuando la compra usó una wallet guardada.
+    //   - iban: IBAN en claro del payout SEPA de esa venta (null en buy). En bank_accounts sólo hay hash(iban)
+    //     más metadatos (bank_name, account_holder_name); el operador usa orders.iban cuando existe.
+    //   - bank_account_id: FK a bank_accounts cuando la venta referencia una cuenta guardada del usuario.
+    //   - user_wallet_id: FK a user_wallets cuando la compra usó una wallet guardada.
     const query = `
       INSERT INTO orders (
         id, user_id, quote_id, type, base, asset, fiat_amount,

@@ -30,12 +30,14 @@ const pool = new Pool({
 });
 
 const migrationsDir = path.join(__dirname, '..', 'migrations');
+// Orden fijo: 006 incluye ALTER idempotentes sobre bank_accounts (titular + banco NOT NULL) además de user_wallets/orders.
 const migrationFiles = [
   '001_initial_schema.sql',
   '002_add_email_verification.sql',
   '003_add_apple_facebook_ids.sql',
   '004_anonymous_user.sql',
   '005_order_number.sql',
+  '006_bank_accounts_user_wallets.sql',
 ];
 
 async function runMigrations() {

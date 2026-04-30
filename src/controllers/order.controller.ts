@@ -2,6 +2,9 @@
  * Order Controller
  * Handles order-related API requests.
  * PayDo: crear orden no llama a PayDo. Retiro SEPA (venta) se inicia en POST /orders/:id/sell/payout.
+ *
+ * Ventas SEPA: el IBAN en claro puede vivir en orders.iban; bank_accounts guarda hash + banco + titular
+ * (ver migración 006 y BankAccountRepository). Mantener ambos mundos alineados en createOrder / sell/payout.
  */
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
@@ -12,9 +15,10 @@ import { getOrCreateAnonymousUserId } from '../repositories/user.repository';
 import { OrderStatus, Order } from '../types';
 import { logger } from '../config/logger';
 import { pool } from '../config/database';
+// IBAN: normalizeIban + isValidIban (mismo criterio que BankAccountController; hash en DB, texto plano en orders.iban).
 import {
   bankAccountRepository,
-  hashIban,
+  isValidIban,
   normalizeIban,
 } from '../repositories/bank-account.repository';
 import { userWalletRepository } from '../repositories/user-wallet.repository';
@@ -69,8 +73,11 @@ export class OrderController {
         type,
         amount_eur,
         amount_crypto,
-        // Sell: el usuario manda IBAN en claro (para poder pagar) y/o un id ya guardado.
+        // Sell: IBAN en claro opcional aquí; si viene, obligatorio enviar también banco + titular
+        // para poder hacer upsert en bank_accounts (reglas NOT NULL). Alternativa: solo bank_account_id.
         iban: rawIban,
+        bank_name: sellBankName,
+        account_holder_name: sellAccountHolderName,
         bank_account_id,
         // Buy: wallet de destino ya guardada por el usuario.
         user_wallet_id,
@@ -117,16 +124,36 @@ export class OrderController {
       const exchangeRate = cryptoAmount > 0 ? fiatAmount / cryptoAmount : quote.exchangeRate;
       const fee = hasValidSellAmounts ? fiatAmount * 0.005 : quote.fee;
 
-      // --- Resolución de bank_account_id / user_wallet_id según el tipo -----
+      // --- Resolución de bank_account_id (sell) / user_wallet_id (buy) ---
       let bankAccountId: string | null = null;
       let userWalletId: string | null = null;
       let ibanForOrder: string | null = null;
 
       if (orderType === 'sell') {
         if (typeof rawIban === 'string' && rawIban.trim().length > 0) {
+          // Guardamos IBAN en la orden para el operador y sincronizamos bank_accounts (hash + banco + titular).
           ibanForOrder = normalizeIban(rawIban);
-          // Upsert el hash para dejar constancia de "cuenta verificada por el user".
-          const up = await bankAccountRepository.upsert(userId, ibanForOrder, null);
+          if (!isValidIban(ibanForOrder)) {
+            res.status(400).json({ error: 'Invalid IBAN format' });
+            return;
+          }
+          const bn =
+            typeof sellBankName === 'string' && sellBankName.trim().length > 0
+              ? sellBankName.trim()
+              : '';
+          const hn =
+            typeof sellAccountHolderName === 'string' &&
+            sellAccountHolderName.trim().length > 0
+              ? sellAccountHolderName.trim()
+              : '';
+          if (!bn || !hn) {
+            res.status(400).json({
+              error:
+                'bank_name and account_holder_name are required when iban is provided',
+            });
+            return;
+          }
+          const up = await bankAccountRepository.upsert(userId, ibanForOrder, bn, hn);
           bankAccountId = up.id;
         } else if (typeof bank_account_id === 'string' && bank_account_id.length > 0) {
           const acc = await bankAccountRepository.findByIdForUser(bank_account_id, userId);
@@ -135,8 +162,8 @@ export class OrderController {
             return;
           }
           bankAccountId = acc.id;
-          // Al no guardar el IBAN en bank_accounts, no podemos rellenar orders.iban aquí.
-          // Quedará null y el cliente deberá pasarlo en /sell/payout.
+          // bank_accounts solo tiene hash: orders.iban sigue vacío hasta que el cliente envíe el IBAN
+          // en POST .../sell/payout (allí se persiste y se re-hace upsert con titular/banco).
         }
       }
 
@@ -276,49 +303,92 @@ export class OrderController {
   /**
    * POST /v1/orders/:id/sell/payout
    * Tras verificar depósito crypto en custodia: ejecuta venta en Binance y retiro SEPA vía PayDo.
+   *
+   * Antes del payout debemos tener IBAN efectivo + banco + titular para cumplir bank_accounts:
+   * - Si el body trae iban nuevo: validamos formato y exigimos bank_name + account_holder_name en el body.
+   * - Si no hay iban en el body pero la orden ya tiene orders.iban: reutilizamos ese valor.
+   * - Si faltan banco/titular en el body pero la orden tiene bank_account_id: los leemos del registro guardado.
+   * - upsert en bank_accounts y, si la orden aún no tenía iban, lo grabamos en orders antes de PayDo.
    */
   async initiateSellPayout(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { iban: rawIban } = req.body as { iban?: string };
+      const {
+        iban: rawIban,
+        bank_name: bodyBankName,
+        account_holder_name: bodyHolderName,
+      } = req.body as {
+        iban?: string;
+        bank_name?: string;
+        account_holder_name?: string;
+      };
       const userId = (req as any).user?.id || (await getOrCreateAnonymousUserId());
 
-      // Si la orden ya trae IBAN persistido (se guardó al crearla), lo reutilizamos
-      // cuando el cliente no envía uno nuevo. Evita pedir IBAN dos veces en el mismo flujo.
+      // Solo strings con contenido tras trim; si vienen vacíos, más abajo intentamos leer banco/titular desde bank_accounts.
+      const trimNonEmpty = (v: unknown): string =>
+        typeof v === 'string' && v.trim().length > 0 ? v.trim() : '';
+
       const existing = await orderRepository.findById(id);
-      if (existing && existing.userId !== userId) {
+      if (!existing) {
+        res.status(404).json({ error: 'Order not found' });
+        return;
+      }
+      if (existing.userId !== userId) {
         res.status(403).json({ error: 'Access denied' });
         return;
       }
 
-      const effectiveIban =
-        typeof rawIban === 'string' && rawIban.trim().length > 0
-          ? normalizeIban(rawIban)
-          : existing?.iban || null;
+      // Si el front envía iban en este POST, sustituye / complementa el valor guardado en la orden.
+      const sendingNewIban =
+        typeof rawIban === 'string' && rawIban.trim().length > 0;
+
+      let effectiveIban: string | null = null;
+      if (sendingNewIban) {
+        effectiveIban = normalizeIban(rawIban!);
+        if (!isValidIban(effectiveIban)) {
+          res.status(400).json({ error: 'Invalid IBAN format' });
+          return;
+        }
+      } else {
+        // Reutilización del flujo “IBAN ya capturado al crear la orden”.
+        effectiveIban = existing.iban ?? null;
+      }
 
       if (!effectiveIban) {
         res.status(400).json({ error: 'iban is required' });
         return;
       }
 
-      // Registrar (upsert) hash en bank_accounts: queremos huella de que este user verificó este IBAN.
-      try {
-        await bankAccountRepository.upsert(userId, effectiveIban, null);
-      } catch (hashErr: any) {
-        // No bloqueamos el payout si el upsert falla — es secundario al flujo de pago.
-        logger.warn('No se pudo upsertar bank_account (hash) en payout', {
-          error: hashErr?.message,
-          ibanHash: hashIban(effectiveIban),
-        });
+      let bankName = trimNonEmpty(bodyBankName);
+      let holderName = trimNonEmpty(bodyHolderName);
+
+      // Si el cliente no repite banco/titular, intentamos hidratar desde la cuenta ya vinculada a la orden.
+      if (!bankName || !holderName) {
+        if (existing.bankAccountId) {
+          const acc = await bankAccountRepository.findByIdForUser(
+            existing.bankAccountId,
+            userId
+          );
+          if (acc) {
+            bankName = acc.bank_name;
+            holderName = acc.account_holder_name;
+          }
+        }
       }
 
-      // Persistir el iban en la orden si todavía no tenía uno (p. ej., viene de bank_account_id).
-      if (existing && !existing.iban) {
-        try {
-          await orderRepository.update(id, { iban: effectiveIban });
-        } catch (persistErr: any) {
-          logger.warn('No se pudo persistir iban en orders', { error: persistErr?.message });
-        }
+      if (!bankName || !holderName) {
+        res.status(400).json({
+          error: 'bank_name and account_holder_name are required',
+        });
+        return;
+      }
+
+      // Mantiene bank_accounts coherente con el último IBAN efectivo del payout (misma huella usuario + hash).
+      await bankAccountRepository.upsert(userId, effectiveIban, bankName, holderName);
+
+      // Caso creación solo con bank_account_id: aquí es la primera vez que guardamos el texto plano en orders.
+      if (!existing.iban) {
+        await orderRepository.update(id, { iban: effectiveIban });
       }
 
       const result = await orderService.executeSellPayout(id, userId, effectiveIban);
