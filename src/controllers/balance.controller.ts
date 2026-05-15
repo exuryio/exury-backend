@@ -2,18 +2,19 @@
  * Balance Controller
  * Handles balance-related API requests
  */
-import { Request, Response } from 'express';
+import { type Response } from 'express';
 import { ledgerService } from '../services/ledger/ledger.service';
 import { logger } from '../config/logger';
+import { type AuthenticatedRequest } from '../types/authenticatedRequest';
 
 export class BalanceController {
   /**
    * GET /v1/users/me/balances
    * Get user balances
    */
-  async getBalances(req: Request, res: Response): Promise<void> {
+  async getBalances(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const userId = (req as any).user?.id || 'test-user-id'; // TODO: Get from auth middleware
+      const userId = req.user?.userId || 'test-user-id'; // TODO: Get from auth middleware
 
       const balances = await ledgerService.getUserBalances(userId);
 
@@ -31,10 +32,10 @@ export class BalanceController {
    * GET /v1/users/me/balances/:asset
    * Get user balance for specific asset
    */
-  async getBalance(req: Request, res: Response): Promise<void> {
+  async getBalance(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { asset } = req.params;
-      const userId = (req as any).user?.id || 'test-user-id'; // TODO: Get from auth middleware
+      const userId = req.user?.userId || 'test-user-id'; // TODO: Get from auth middleware
 
       const balance = await ledgerService.getUserBalance(userId, asset);
 
