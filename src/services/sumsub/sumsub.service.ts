@@ -82,7 +82,7 @@ class SumsubService {
             ? payload.slice(0, 500)
             : JSON.stringify(payload ?? err.message).slice(0, 500);
         logger.error('SumSub API error', { status, body: bodySnippet });
-        throw new Error(`SumSub API HTTP ${status ?? 'unknown'}`);
+        throw new Error(`SumSub API HTTP ${status ?? 'unknown'}`, { cause: err });
       }
       throw err;
     }
