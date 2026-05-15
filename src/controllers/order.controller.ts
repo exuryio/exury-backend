@@ -3,7 +3,7 @@
  * Handles order-related API requests.
  * PayDo se usa solo en el webhook cuando el banco avisa; crear orden no depende de PayDo.
  */
-import { Request, Response } from 'express';
+import { type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { orderRepository } from '../repositories/order.repository';
 import { pricingService } from '../services/pricing/pricing.service';
@@ -11,6 +11,7 @@ import { getOrCreateAnonymousUserId } from '../repositories/user.repository';
 import { OrderStatus } from '../types';
 import { logger } from '../config/logger';
 import { pool } from '../config/database';
+import { AuthenticatedRequest } from '../types/authenticatedRequest';
 
 /** Referencia obligatoria: siempre 5 dígitos (ej. 00001, 00005) */
 function formatReference(orderNumber: number): string {
@@ -22,13 +23,13 @@ export class OrderController {
    * POST /v1/orders
    * Crear orden: recibe quote_id, guarda la orden y devuelve id al frontend.
    */
-  async createOrder(req: Request, res: Response): Promise<void> {
+  async createOrder(req: AuthenticatedRequest, res: Response): Promise<void> {
     const client = await pool.connect();
 
     try {
       const { quote_id, type, amount_eur, amount_crypto } = req.body;
       const userId =
-        (req as any).user?.id || (await getOrCreateAnonymousUserId());
+        req.user?.userId || (await getOrCreateAnonymousUserId());
 
       if (!quote_id) {
         res.status(400).json({ error: 'quote_id is required' });
@@ -110,11 +111,11 @@ export class OrderController {
    * GET /v1/orders/:id
    * Devuelve la orden (importe, estado, referencia).
    */
-  async getOrder(req: Request, res: Response): Promise<void> {
+  async getOrder(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
       const userId =
-        (req as any).user?.id || (await getOrCreateAnonymousUserId());
+        req.user?.userId || (await getOrCreateAnonymousUserId());
 
       const order = await orderRepository.findById(id);
       if (!order) {
@@ -163,10 +164,10 @@ export class OrderController {
    * GET /v1/orders
    * Get user's orders
    */
-  async getUserOrders(req: Request, res: Response): Promise<void> {
+  async getUserOrders(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const userId =
-        (req as any).user?.id || (await getOrCreateAnonymousUserId());
+        req.user?.userId || (await getOrCreateAnonymousUserId());
 
       const orders = await orderRepository.findByUserId(userId);
 

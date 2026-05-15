@@ -4,6 +4,7 @@
  */
 import { pool } from '../config/database';
 import { logger } from '../config/logger';
+import { type User } from '../types';
 
 const ANONYMOUS_EMAIL = 'anonymous@exury.io';
 
@@ -41,6 +42,32 @@ export async function getOrCreateAnonymousUserId(): Promise<string> {
     return id;
   } catch (error: any) {
     logger.error('getOrCreateAnonymousUserId failed', { error: error.message });
+    throw error;
+  }
+}
+
+
+export async function getUserById(userId: string) {
+  try {
+    const result = await pool.query<User>(
+      `SELECT
+        id,
+        email,
+        applicant_review_status,
+        applicant_review_answer,
+        applicant_review_reject_type,
+        applicant_id
+      FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return result.rows[0];
+  } catch (error: any) {
+    logger.error('getUserById failed', { userId, error: error.message });
     throw error;
   }
 }
