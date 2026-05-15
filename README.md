@@ -51,7 +51,7 @@ cp .env.example .env
 createdb exury_db
 
 # Run migrations
-psql exury_db < migrations/001_initial_schema.sql
+npm run migrate:up
 ```
 
 4. **Start the server:**
@@ -88,6 +88,10 @@ The API will be available at `http://localhost:3001`
 - `GET /v1/users/me/balances` - Get all user balances
 - `GET /v1/users/me/balances/:asset` - Get balance for specific asset
 
+## KYC
+
+- `GET /v1/users/me/kyc-status` - KYC status
+
 ## 🔧 Configuration
 
 ### Environment Variables
@@ -122,7 +126,7 @@ npm run lint
 
 ## 📊 Database Schema
 
-See `migrations/001_initial_schema.sql` for the complete schema.
+See `migrations/*.sql` for the complete schema.
 
 Key tables:
 - `users` - User accounts
@@ -150,7 +154,7 @@ Console logging in development mode.
 
 ## 🚧 Next Steps
 
-- [ ] Authentication middleware (JWT)
+- [x] Authentication middleware (JWT)
 - [ ] Rate limiting
 - [ ] Unit tests
 - [ ] Integration tests

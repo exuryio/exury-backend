@@ -10,11 +10,9 @@
     "migrate": "node-pg-migrate",
     "migrate:up": "node-pg-migrate up",
     "migrate:down": "node-pg-migrate down",
-    "migrate:run": "node scripts/run-migrations.js",
     "lint": "eslint src --ext .ts",
     "test": "echo \"No tests specified\" && exit 0",
-    "cleanup:users": "tsx scripts/cleanup-test-users.ts",
-    "cleanup:user": "tsx scripts/cleanup-test-users.ts"
+    "cleanup:users": "tsx scripts/cleanup-test-users.ts"
   },
   "keywords": [
     "exury",
