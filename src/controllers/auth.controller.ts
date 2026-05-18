@@ -10,6 +10,22 @@ import { logger } from '../config/logger';
 import { pool } from '../config/database';
 import { emailService } from '../services/email/email.service';
 
+function getRequiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value || value.trim().length === 0) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
+function createSessionToken(userId: string, email: string): string {
+  return jwt.sign(
+    { userId, email },
+    getRequiredEnv('JWT_SECRET'),
+    { expiresIn: '7d' }
+  );
+}
+
 export class AuthController {
   /**
    * POST /v1/auth/register
@@ -72,23 +88,15 @@ export class AuthController {
       
       if (!emailSent) {
         logger.warn(`⚠️ Failed to send email to ${email}`);
-        logger.warn(`📝 Verification code generated: ${verificationCode}`);
         logger.warn(`💡 Check backend logs for email service errors`);
-        logger.warn(`💡 If using Ethereal Email, check the preview URL in logs`);
-        
-        // Still return success, but log the code for manual verification in development
-        if (process.env.NODE_ENV === 'development') {
-          logger.info(`🔐 Verification code for ${email}: ${verificationCode}`);
-        }
+        return res.status(502).json({ error: 'No se pudo enviar el código de verificación' });
       } else {
         logger.info(`✅ Verification email sent successfully to ${email}`);
       }
 
       return res.json({
         success: true,
-        message: 'Código de verificación enviado',
-        // In development, also return code in response for testing
-        code: process.env.NODE_ENV === 'development' ? verificationCode : undefined
+        message: 'Código de verificación enviado'
       });
     } catch (error: any) {
       logger.error('Registration error:', error);
@@ -207,18 +215,13 @@ export class AuthController {
       const emailSent = await emailService.sendVerificationCode(email, verificationCode);
       
       if (!emailSent) {
-        logger.warn(`Failed to resend email to ${email}, but code was generated: ${verificationCode}`);
-        // Still return success, but log the code for manual verification in development
-        if (process.env.NODE_ENV === 'development') {
-          logger.info(`Resent verification code for ${email}: ${verificationCode}`);
-        }
+        logger.warn(`Failed to resend email to ${email}`);
+        return res.status(502).json({ error: 'No se pudo reenviar el código de verificación' });
       }
 
       return res.json({
         success: true,
-        message: 'Código reenviado',
-        // In development, also return code in response for testing
-        code: process.env.NODE_ENV === 'development' ? verificationCode : undefined
+        message: 'Código reenviado'
       });
     } catch (error: any) {
       logger.error('Resend code error:', error);
@@ -238,17 +241,17 @@ export class AuthController {
         return res.status(400).json({ error: 'Código de autorización requerido' });
       }
 
-      const auth0Domain = process.env.AUTH0_DOMAIN || 'exury.eu.auth0.com';
-      const auth0ClientId = process.env.AUTH0_CLIENT_ID || '';
-      const auth0ClientSecret = process.env.AUTH0_CLIENT_SECRET || '';
+      const auth0Domain = getRequiredEnv('AUTH0_DOMAIN');
+      const auth0ClientId = getRequiredEnv('AUTH0_CLIENT_ID');
+      const auth0ClientSecret = getRequiredEnv('AUTH0_CLIENT_SECRET');
       
       // CRITICAL: redirect_uri MUST match exactly what was used in the authorization request
       // It MUST be exactly the same as:
       // 1. What's configured in Auth0 Dashboard → Settings → Allowed Callback URLs
       // 2. What the frontend uses when redirecting to Auth0
       // Use the redirect_uri from the request body (sent by frontend) to support dynamic URLs
-      // Fallback to env variable for backward compatibility
-      const redirectUri = redirect_uri || process.env.AUTH0_REDIRECT_URI || 'http://localhost:5173/auth-callback';
+      // Fallback to env variable for backend-managed clients; never use localhost defaults in production code.
+      const redirectUri = redirect_uri || getRequiredEnv('AUTH0_REDIRECT_URI');
       
       logger.info(`🔐 Processing Auth0 callback`);
       logger.info(`   Domain: ${auth0Domain}`);
@@ -410,9 +413,7 @@ export class AuthController {
             }
           }
           
-          // Generate JWT token for session management
-          const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
-          const token = jwt.sign({ userId, email: email.toLowerCase() }, JWT_SECRET, { expiresIn: '7d' });
+          const token = createSessionToken(userId, email.toLowerCase());
           
           res.json({
             success: true,
@@ -486,13 +487,7 @@ export class AuthController {
 
       logger.info(`✅ User authenticated via Auth0: ${email} (${userId})`);
       
-      // Generate JWT token for session management
-      const jwtSecret = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-      const token = jwt.sign(
-        { userId, email },
-        jwtSecret,
-        { expiresIn: '7d' }
-      );
+      const token = createSessionToken(userId, email);
       
       // Check if user was already registered
       const existingUserCheck = existingUser.rows.length > 0 ? existingUser.rows[0] : null;
@@ -566,20 +561,14 @@ export class AuthController {
       
       if (!emailSent) {
         logger.warn(`⚠️ Failed to send login email to ${email}`);
-        logger.warn(`📝 Verification code generated: ${verificationCode}`);
-        
-        if (process.env.NODE_ENV === 'development') {
-          logger.info(`🔐 Login verification code for ${email}: ${verificationCode}`);
-        }
+        return res.status(502).json({ error: 'No se pudo enviar el código de inicio de sesión' });
       } else {
         logger.info(`✅ Login verification email sent successfully to ${email}`);
       }
 
       return res.json({
         success: true,
-        message: 'Código de verificación enviado',
-        // In development, also return code in response for testing
-        code: process.env.NODE_ENV === 'development' ? verificationCode : undefined
+        message: 'Código de verificación enviado'
       });
     } catch (error: any) {
       logger.error('Login error:', error);

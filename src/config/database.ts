@@ -6,20 +6,34 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+function getRequiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value || value.trim().length === 0) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
 const poolConfig: PoolConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'exury_db',
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,
 };
 
-// Use DATABASE_URL if provided (for production)
 if (process.env.DATABASE_URL) {
   poolConfig.connectionString = process.env.DATABASE_URL;
+  if (
+    process.env.DATABASE_URL.includes('railway') ||
+    process.env.DATABASE_URL.includes('rlwy.net')
+  ) {
+    poolConfig.ssl = { rejectUnauthorized: false };
+  }
+} else {
+  poolConfig.host = getRequiredEnv('DB_HOST');
+  poolConfig.port = parseInt(process.env.DB_PORT || '5432', 10);
+  poolConfig.database = getRequiredEnv('DB_NAME');
+  poolConfig.user = getRequiredEnv('DB_USER');
+  poolConfig.password = getRequiredEnv('DB_PASSWORD');
 }
 
 export const pool = new Pool(poolConfig);

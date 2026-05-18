@@ -7,6 +7,12 @@ import { ledgerService } from '../services/ledger/ledger.service';
 import { logger } from '../config/logger';
 import { type AuthenticatedRequest } from '../types/authenticatedRequest';
 
+function getAuthUserId(req: AuthenticatedRequest): string {
+  const userId = req.user?.userId;
+  if (!userId) throw new Error('UNAUTHENTICATED');
+  return userId;
+}
+
 export class BalanceController {
   /**
    * GET /v1/users/me/balances
@@ -14,12 +20,16 @@ export class BalanceController {
    */
   async getBalances(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const userId = req.user?.userId || 'test-user-id'; // TODO: Get from auth middleware
+      const userId = getAuthUserId(req);
 
       const balances = await ledgerService.getUserBalances(userId);
 
       res.json({ balances });
     } catch (error: any) {
+      if (error?.message === 'UNAUTHENTICATED') {
+        res.status(401).json({ error: 'Authentication required' });
+        return;
+      }
       logger.error('Error getting balances', { error: error.message });
       res.status(500).json({
         error: 'Failed to get balances',
@@ -35,7 +45,7 @@ export class BalanceController {
   async getBalance(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { asset } = req.params;
-      const userId = req.user?.userId || 'test-user-id'; // TODO: Get from auth middleware
+      const userId = getAuthUserId(req);
 
       const balance = await ledgerService.getUserBalance(userId, asset);
 
@@ -51,6 +61,10 @@ export class BalanceController {
 
       res.json(balance);
     } catch (error: any) {
+      if (error?.message === 'UNAUTHENTICATED') {
+        res.status(401).json({ error: 'Authentication required' });
+        return;
+      }
       logger.error('Error getting balance', { error: error.message });
       res.status(500).json({
         error: 'Failed to get balance',

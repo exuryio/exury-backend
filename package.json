@@ -6,12 +6,13 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "npx tsc",
+    "typecheck": "tsc --noEmit",
     "start": "node dist/server.js",
     "migrate": "node-pg-migrate",
     "migrate:up": "node-pg-migrate up",
     "migrate:down": "node-pg-migrate down",
     "migrate:run": "node scripts/run-migrations.js",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint src",
     "test": "echo \"No tests specified\" && exit 0",
     "cleanup:users": "tsx scripts/cleanup-test-users.ts",
     "cleanup:user": "tsx scripts/cleanup-test-users.ts"

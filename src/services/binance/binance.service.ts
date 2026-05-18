@@ -30,6 +30,12 @@ class BinanceService {
     });
   }
 
+  private ensureTradingCredentials(): void {
+    if (!this.apiKey || !this.apiSecret) {
+      throw new Error('Binance trading credentials are not configured');
+    }
+  }
+
   /**
    * Get current price for a crypto asset
    * Converts asset symbol to Binance trading pair (e.g., BTC -> BTCEUR)
@@ -87,18 +93,6 @@ class BinanceService {
         }
       }
 
-      // In development, return mock price if API fails
-      if (process.env.NODE_ENV === 'development' && !this.apiKey) {
-        return this.getMockPrice(asset);
-      }
-
-      // If we have a fallback price for this asset, use it
-      const fallbackPrice = this.getFallbackPrice(asset);
-      if (fallbackPrice) {
-        logger.warn(`Using fallback price for ${asset}: ${fallbackPrice.price}`);
-        return fallbackPrice;
-      }
-
       throw error;
     }
   }
@@ -111,6 +105,7 @@ class BinanceService {
     eurAmount: number
   ): Promise<BinanceOrderResponse> {
     try {
+      this.ensureTradingCredentials();
       const symbol = this.getTradingPair(asset);
 
       // For now, we'll use market order
@@ -152,11 +147,6 @@ class BinanceService {
         eurAmount,
       });
 
-      // In development, return mock response if API fails
-      if (process.env.NODE_ENV === 'development' && !this.apiKey) {
-        return this.getMockOrderResponse(asset, eurAmount, 'BUY');
-      }
-
       throw error;
     }
   }
@@ -169,6 +159,7 @@ class BinanceService {
     cryptoAmount: number
   ): Promise<BinanceOrderResponse> {
     try {
+      this.ensureTradingCredentials();
       const symbol = this.getTradingPair(asset);
 
       const params = {
@@ -207,11 +198,6 @@ class BinanceService {
         asset,
         cryptoAmount,
       });
-
-      // In development, return mock response if API fails
-      if (process.env.NODE_ENV === 'development' && !this.apiKey) {
-        return this.getMockOrderResponse(asset, cryptoAmount, 'SELL');
-      }
 
       throw error;
     }
@@ -256,25 +242,6 @@ class BinanceService {
       .createHmac('sha256', this.apiSecret)
       .update(queryString)
       .digest('hex');
-  }
-
-  /**
-   * Mock price for development/testing
-   */
-  private getMockPrice(asset: string): BinancePrice {
-    const mockPrices: Record<string, string> = {
-      BTC: '45000',
-      ETH: '2800',
-      BNB: '350',
-      USDT: '0.92',
-      USDC: '0.87', // 1 USDC = 0.87 EUR (inverted from EURUSDC which would be ~1.151)
-      SOL: '120',
-    };
-
-    return {
-      symbol: this.getTradingPair(asset),
-      price: mockPrices[asset] || '1000',
-    };
   }
 
   /**
@@ -336,48 +303,6 @@ class BinanceService {
     }
   }
 
-  /**
-   * Fallback price when Binance API is unavailable (e.g., 451 error)
-   * Uses approximate market prices as fallback
-   */
-  private getFallbackPrice(asset: string): BinancePrice | null {
-    // Fallback prices (approximate market values in EUR)
-    const fallbackPrices: Record<string, string> = {
-      USDC: '0.92', // Stablecoin, approximately 1 USD = 0.92 EUR
-      USDT: '0.92', // Stablecoin, approximately 1 USD = 0.92 EUR
-      BTC: '45000', // Approximate BTC price in EUR
-      ETH: '2800',  // Approximate ETH price in EUR
-      BNB: '350',   // Approximate BNB price in EUR
-      SOL: '120',   // Approximate SOL price in EUR
-    };
-
-    const price = fallbackPrices[asset];
-    if (!price) {
-      return null;
-    }
-
-    return {
-      symbol: this.getTradingPair(asset),
-      price: price,
-    };
-  }
-
-  /**
-   * Mock order response for development/testing
-   */
-  private getMockOrderResponse(
-    asset: string,
-    amount: number,
-    side: 'BUY' | 'SELL'
-  ): BinanceOrderResponse {
-    return {
-      orderId: Math.floor(Math.random() * 1000000),
-      symbol: this.getTradingPair(asset),
-      status: 'FILLED',
-      executedQty: side === 'SELL' ? amount.toString() : (amount / parseFloat(this.getMockPrice(asset).price)).toString(),
-      cummulativeQuoteQty: side === 'BUY' ? amount.toString() : (amount * parseFloat(this.getMockPrice(asset).price)).toString(),
-    };
-  }
 }
 
 export const binanceService = new BinanceService();

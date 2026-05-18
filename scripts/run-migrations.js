@@ -4,9 +4,6 @@
  * This script reads SQL files and executes them in order
  */
 
-// Permitir conexión SSL a Railway (certificado auto-firmado)
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');

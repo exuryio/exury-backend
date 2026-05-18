@@ -25,10 +25,7 @@ export class PayDoController {
       const signature = req.headers['x-paydo-signature'] as string;
       const payload = JSON.stringify(req.body);
 
-      if (
-        process.env.NODE_ENV === 'production' &&
-        !paydoService.verifyWebhookSignature(payload, signature)
-      ) {
+      if (!paydoService.verifyWebhookSignature(payload, signature)) {
         res.status(401).json({ error: 'Invalid signature' });
         return;
       }

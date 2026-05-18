@@ -24,33 +24,36 @@ const app: Express = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 const API_VERSION = process.env.API_VERSION || 'v1';
+const NODE_ENV = process.env.NODE_ENV || 'production';
+const configuredCorsOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 console.log(`📋 Configuration: PORT=${PORT}, HOST=${HOST}, API_VERSION=${API_VERSION}`);
 
 // Middleware
 app.use(helmet());
-// Configure CORS to allow Firebase preview domains and production domains
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    
+
+    if (configuredCorsOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
     // Allow Firebase preview domains (exurydev--pr*.web.app)
     if (origin.includes('exurydev--') && origin.includes('.web.app')) {
       return callback(null, true);
     }
-    
+
     // Allow production domains
     if (origin.includes('exury.io') || origin.includes('exurydev.web.app')) {
       return callback(null, true);
     }
-    
-    // Allow localhost for development
-    if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-      return callback(null, true);
-    }
-    
-    // Default: allow all origins (for now, can be restricted later)
-    callback(null, true);
+
+    logger.warn('Blocked CORS origin', { origin });
+    callback(null, false);
   },
   credentials: true,
 }));
@@ -92,7 +95,7 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
 
   res.status(500).json({
     error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    message: NODE_ENV === 'development' ? err.message : undefined,
   });
 });
 
@@ -180,11 +183,11 @@ console.log('🚀 Attempting to start server...');
 const server = app.listen(PORT, HOST, () => {
   console.log(`🚀 Exury Backend API running on ${HOST}:${PORT}`);
   console.log(`📡 API Version: ${API_VERSION}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🌍 Environment: ${NODE_ENV}`);
   console.log(`🔗 Accessible at: http://${HOST}:${PORT}`);
   logger.info(`🚀 Exury Backend API running on ${HOST}:${PORT}`);
   logger.info(`📡 API Version: ${API_VERSION}`);
-  logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  logger.info(`🌍 Environment: ${NODE_ENV}`);
 });
 
 // Handle server errors

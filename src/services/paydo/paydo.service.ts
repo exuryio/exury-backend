@@ -18,15 +18,11 @@ interface PayDoPayment {
 
 class PayDoService {
   private apiKey: string;
-  // apiSecret stored for future webhook signature verification
-  // @ts-ignore - Will be used in verifyWebhookSignature implementation
-  private apiSecret: string;
   private baseURL: string;
   private client: AxiosInstance;
 
   constructor() {
     this.apiKey = process.env.PAYDO_API_KEY || '';
-    this.apiSecret = process.env.PAYDO_API_SECRET || '';
     this.baseURL = process.env.PAYDO_BASE_URL || 'https://paydo.com/api/v1';
 
     this.client = axios.create({
@@ -38,6 +34,15 @@ class PayDoService {
     });
   }
 
+  private ensureConfigured(): void {
+    if (!this.apiKey) {
+      throw new Error('PAYDO_API_KEY is not configured');
+    }
+    if (!process.env.API_BASE_URL) {
+      throw new Error('API_BASE_URL is not configured');
+    }
+  }
+
   /**
    * Create a SEPA deposit payment
    */
@@ -47,6 +52,7 @@ class PayDoService {
     reference: string
   ): Promise<PayDoPayment> {
     try {
+      this.ensureConfigured();
       const payload = {
         amount,
         currency: 'EUR',
@@ -81,11 +87,6 @@ class PayDoService {
         amount,
       });
 
-      // In development, return mock payment if API fails
-      if (process.env.NODE_ENV === 'development' && !this.apiKey) {
-        return this.getMockPayment('deposit', amount, reference);
-      }
-
       throw error;
     }
   }
@@ -100,6 +101,7 @@ class PayDoService {
     reference: string
   ): Promise<PayDoPayment> {
     try {
+      this.ensureConfigured();
       const payload = {
         amount,
         currency: 'EUR',
@@ -134,11 +136,6 @@ class PayDoService {
         userId,
         amount,
       });
-
-      // In development, return mock payment if API fails
-      if (process.env.NODE_ENV === 'development' && !this.apiKey) {
-        return this.getMockPayment('withdrawal', amount, reference);
-      }
 
       throw error;
     }
@@ -177,8 +174,13 @@ class PayDoService {
     signature: string
   ): boolean {
     try {
+      const secret = process.env.PAYDO_WEBHOOK_SECRET;
+      if (!secret || !signature) {
+        return false;
+      }
+
       const expectedSignature = crypto
-        .createHmac('sha256', process.env.PAYDO_WEBHOOK_SECRET || '')
+        .createHmac('sha256', secret)
         .update(payload)
         .digest('hex');
 
@@ -210,24 +212,6 @@ class PayDoService {
     }
   }
 
-  /**
-   * Mock payment for development/testing
-   */
-  private getMockPayment(
-    type: string,
-    amount: number,
-    reference: string
-  ): PayDoPayment {
-    return {
-      id: `mock_${Date.now()}`,
-      status: 'pending',
-      amount,
-      currency: 'EUR',
-      type,
-      reference,
-      created_at: new Date().toISOString(),
-    };
-  }
 }
 
 export const paydoService = new PayDoService();
