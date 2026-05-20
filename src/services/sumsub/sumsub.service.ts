@@ -1,86 +1,148 @@
 /**
- * SumSub API Service
- * Handles signed requests to the SumSub KYC platform.
- * Docs: https://developers.sumsub.com/api-reference/
+ * SumSub API client — applicant review status
  */
 import axios from 'axios';
 import crypto from 'crypto';
+import sumsubConfig from '../../config/sumsub';
 import { logger } from '../../config/logger';
 
-export interface SumsubApplicant {
-  id: string;
-  externalUserId: string;
-  review?: {
-    reviewStatus: string;
-    reviewResult?: {
-      reviewAnswer: string;
-      reviewRejectType?: string;
-    };
+export interface KYCResponse {
+  /** True when Sumsub reports `reviewStatus: completed` and `reviewAnswer: GREEN` */
+  kycStatus: boolean;
+  reviewStatus?: string;
+  reviewAnswer?: string;
+  reviewRejectType?: string;
+  applicantId?: string;
+}
+
+/** Shape of GET /resources/applicants/{id}/status (see Sumsub docs) */
+interface SumsubApplicantStatusBody {
+  reviewStatus?: string;
+  reviewResult?: {
+    reviewAnswer?: string;
+    reviewRejectType?: string;
   };
 }
 
-export class SumsubService {
-  private readonly appToken: string;
-  private readonly secretKey: string;
-  private readonly baseUrl: string;
+/** Minimal shape of GET /resources/applicants/-;externalUserId={id}/one */
+interface SumsubApplicantBody {
+  id?: string;
+}
 
-  constructor() {
-    this.appToken = process.env.SUMSUB_APP_TOKEN || '';
-    this.secretKey = process.env.SUMSUB_SECRET_KEY || '';
-    this.baseUrl = process.env.SUMSUB_BASE_URL || 'https://api.sumsub.com';
-  }
+class SumsubService {
+  private readonly baseUrl = sumsubConfig.baseUrl.replace(/\/+$/, '');
 
-  get isConfigured(): boolean {
-    return Boolean(this.appToken && this.secretKey);
-  }
+  private signRequest(method: string, pathWithQuery: string, body: string = ''): Record<string, string> {
+    const appToken = sumsubConfig.appToken;
+    const secretKey = sumsubConfig.secretKey;
+    if (!appToken || !secretKey) {
+      const vars =
+        sumsubConfig.credentialMode === 'production'
+          ? 'SUMSUB_APP_TOKEN_PROD and SUMSUB_SECRET_KEY_PROD'
+          : 'SUMSUB_APP_TOKEN_SANDBOX and SUMSUB_SECRET_KEY_SANDBOX';
+      throw new Error(
+        `SumSub is not configured for "${sumsubConfig.credentialMode}" (${vars}). ` +
+          'Override mode with SUMSUB_ENV or SUMSUB_USE_PRODUCTION if needed.',
+      );
+    }
 
-  private createSignedHeaders(method: string, path: string, body = ''): Record<string, string> {
-    const ts = Math.floor(Date.now() / 1000);
-    const hmac = crypto.createHmac('sha256', this.secretKey);
-    hmac.update(`${ts}${method.toUpperCase()}${path}${body}`);
-    const sig = hmac.digest('hex');
+    const ts = Math.floor(Date.now() / 1000).toString();
+    const payload = ts + method.toUpperCase() + pathWithQuery + body;
+
+    const signature = crypto.createHmac('sha256', secretKey).update(payload).digest('hex');
 
     return {
-      'X-App-Token': this.appToken,
-      'X-App-Access-Ts': String(ts),
-      'X-App-Access-Sig': sig,
+      'X-App-Token': appToken,
+      'X-App-Access-Ts': ts,
+      'X-App-Access-Sig': signature,
       'Content-Type': 'application/json',
+      Accept: 'application/json',
     };
   }
 
   /**
-   * Look up a SumSub applicant whose externalUserId matches the given email.
-   * Returns null if not found or if credentials are not configured.
+   * Look up a SumSub applicant by externalUserId (typically the user's email).
+   * Returns the SumSub applicant ID, or null if no record exists.
    */
-  async findApplicantByEmail(email: string): Promise<SumsubApplicant | null> {
-    if (!this.isConfigured) {
-      logger.warn('SumSub credentials not configured, skipping KYC handshake');
-      return null;
+  async findApplicantByExternalUserId(externalUserId: string): Promise<string | null> {
+    const id = externalUserId.trim();
+    if (!id) {
+      throw new Error('externalUserId is required');
     }
 
-    const path = `/resources/applicants/-;externalUserId=${encodeURIComponent(email)}/one`;
+    const path = `/resources/applicants/-;externalUserId=${encodeURIComponent(id)}/one`;
+    const url = `${this.baseUrl}${path}`;
+    const headers = this.signRequest('GET', path);
 
     try {
-      const response = await axios.get<SumsubApplicant>(`${this.baseUrl}${path}`, {
-        headers: this.createSignedHeaders('GET', path),
-        timeout: 5000,
+      const response = await axios.get<SumsubApplicantBody>(url, {
+        headers,
+        timeout: 15_000,
+        validateStatus: (status: number) => status === 200 || status === 404,
       });
-      return response.data;
-    } catch (error: any) {
-      if (error.response?.status === 404) {
-        logger.info(`SumSub: no applicant found for email ${email}`);
-        return null;
+      if (response.status === 404) return null;
+      return response.data?.id ?? null;
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        const status = err.response?.status;
+        const payload = err.response?.data;
+        const bodySnippet =
+          typeof payload === 'string'
+            ? payload.slice(0, 500)
+            : JSON.stringify(payload ?? err.message).slice(0, 500);
+        logger.error('SumSub API error (findApplicantByExternalUserId)', { status, body: bodySnippet });
+        throw new Error(`SumSub API HTTP ${status ?? 'unknown'}`, { cause: err });
       }
-      logger.error('SumSub findApplicantByEmail error', { email, error: error.message });
-      return null;
+      throw err;
     }
   }
 
-  isApproved(applicant: SumsubApplicant): boolean {
-    return (
-      applicant.review?.reviewStatus === 'completed' &&
-      applicant.review?.reviewResult?.reviewAnswer === 'GREEN'
-    );
+  async getKycStatus(applicantId: string): Promise<KYCResponse> {
+    const id = applicantId.trim();
+    if (!id) {
+      throw new Error('applicantId is required');
+    }
+
+    const path = `/resources/applicants/${encodeURIComponent(id)}/status`;
+    const url = `${this.baseUrl}${path}`;
+    const headers = this.signRequest('GET', path);
+
+    let data: SumsubApplicantStatusBody;
+    try {
+      const response = await axios.get<SumsubApplicantStatusBody>(url, {
+        headers,
+        timeout: 15_000,
+        validateStatus: (status: number) => status === 200,
+      });
+      data = response.data ?? {};
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        const status = err.response?.status;
+        const payload = err.response?.data;
+        const bodySnippet =
+          typeof payload === 'string'
+            ? payload.slice(0, 500)
+            : JSON.stringify(payload ?? err.message).slice(0, 500);
+        logger.error('SumSub API error', { status, body: bodySnippet });
+        throw new Error(`SumSub API HTTP ${status ?? 'unknown'}`, { cause: err });
+      }
+      throw err;
+    }
+
+    const reviewResult = data.reviewResult ?? {};
+    const reviewStatus = data.reviewStatus;
+    const reviewAnswer = reviewResult.reviewAnswer;
+    const reviewRejectType = reviewResult.reviewRejectType;
+
+    const kycStatus = reviewStatus === 'completed' && reviewAnswer === 'GREEN';
+
+    return {
+      kycStatus,
+      reviewStatus,
+      reviewAnswer,
+      reviewRejectType,
+      applicantId: id,
+    };
   }
 }
 

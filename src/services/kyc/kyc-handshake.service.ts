@@ -24,23 +24,28 @@ export async function performKycHandshake(userId: string, email: string): Promis
   logger.info(`🔍 KYC handshake: checking SumSub for user ${userId} (${email})`);
 
   try {
-    const applicant = await sumsubService.findApplicantByEmail(email);
+    const applicantId = await sumsubService.findApplicantByExternalUserId(email);
 
-    if (!applicant) {
+    if (!applicantId) {
       // No SumSub record — mark as checked so we don't retry on every login
       await markSumsubChecked(userId);
       logger.info(`KYC handshake: no SumSub record for ${email}`);
       return false;
     }
 
-    const reviewStatus = applicant.review?.reviewStatus ?? 'unknown';
-    const reviewAnswer = applicant.review?.reviewResult?.reviewAnswer ?? 'RED';
-    const reviewRejectType = applicant.review?.reviewResult?.reviewRejectType;
+    const { kycStatus, reviewStatus, reviewAnswer, reviewRejectType } =
+      await sumsubService.getKycStatus(applicantId);
 
-    await updateUserKycFromSumsub(userId, applicant.id, reviewStatus, reviewAnswer, reviewRejectType);
+    await updateUserKycFromSumsub(
+      userId,
+      applicantId,
+      reviewStatus ?? 'unknown',
+      reviewAnswer ?? 'RED',
+      reviewRejectType,
+    );
 
-    if (sumsubService.isApproved(applicant)) {
-      logger.info(`✅ KYC handshake: user ${userId} approved via SumSub (applicant ${applicant.id})`);
+    if (kycStatus) {
+      logger.info(`✅ KYC handshake: user ${userId} approved via SumSub (applicant ${applicantId})`);
       return true;
     }
 
