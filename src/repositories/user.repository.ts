@@ -56,7 +56,8 @@ export async function getUserById(userId: string) {
         applicant_review_status,
         applicant_review_answer,
         applicant_review_reject_type,
-        applicant_id
+        applicant_id,
+        sumsub_checked_at
       FROM users WHERE id = $1`,
       [userId]
     );
@@ -68,6 +69,51 @@ export async function getUserById(userId: string) {
     return result.rows[0];
   } catch (error: any) {
     logger.error('getUserById failed', { userId, error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * Populate a user's KYC fields from a SumSub applicant record.
+ * Also marks sumsub_checked_at so the handshake is not repeated.
+ */
+export async function updateUserKycFromSumsub(
+  userId: string,
+  applicantId: string,
+  reviewStatus: string,
+  reviewAnswer: string,
+  reviewRejectType?: string
+): Promise<void> {
+  try {
+    await pool.query(
+      `UPDATE users
+       SET applicant_id = $1,
+           applicant_review_status = $2,
+           applicant_review_answer = $3,
+           applicant_review_reject_type = $4,
+           sumsub_checked_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $5`,
+      [applicantId, reviewStatus, reviewAnswer, reviewRejectType ?? null, userId]
+    );
+  } catch (error: any) {
+    logger.error('updateUserKycFromSumsub failed', { userId, error: error.message });
+    throw error;
+  }
+}
+
+/**
+ * Record that the SumSub handshake was attempted (even if no applicant was found).
+ * Prevents repeated lookups on every login.
+ */
+export async function markSumsubChecked(userId: string): Promise<void> {
+  try {
+    await pool.query(
+      `UPDATE users SET sumsub_checked_at = NOW(), updated_at = NOW() WHERE id = $1`,
+      [userId]
+    );
+  } catch (error: any) {
+    logger.error('markSumsubChecked failed', { userId, error: error.message });
     throw error;
   }
 }

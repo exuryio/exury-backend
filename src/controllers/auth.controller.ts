@@ -9,6 +9,7 @@ import axios from 'axios';
 import { logger } from '../config/logger';
 import { pool } from '../config/database';
 import { emailService } from '../services/email/email.service';
+import { performKycHandshake } from '../services/kyc/kyc-handshake.service';
 
 export class AuthController {
   /**
@@ -146,17 +147,24 @@ export class AuthController {
         [email.toLowerCase()]
       );
 
-      // Get user email
+      // Get user email and check if KYC handshake is needed
       const userResult = await pool.query(
-        'SELECT email FROM users WHERE id = $1',
+        'SELECT email, sumsub_checked_at FROM users WHERE id = $1',
         [user_id]
       );
+
+      const userEmail = userResult.rows[0]?.email || email;
+
+      // Run KYC handshake on first login if it has never been attempted
+      if (!userResult.rows[0]?.sumsub_checked_at) {
+        await performKycHandshake(user_id, userEmail.toLowerCase());
+      }
 
       res.json({
         success: true,
         message: 'Email verificado correctamente',
         user_id,
-        email: userResult.rows[0]?.email || email
+        email: userEmail
       });
     } catch (error: any) {
       logger.error('Email verification error:', error);
@@ -357,8 +365,8 @@ export class AuthController {
 
       // Check if user exists by email or any social ID
       const existingUser = await pool.query(
-        `SELECT id, email_verified, google_id, apple_id, facebook_id 
-         FROM users 
+        `SELECT id, email_verified, google_id, apple_id, facebook_id, sumsub_checked_at
+         FROM users
          WHERE email = $1 OR google_id = $2 OR apple_id = $2 OR facebook_id = $2`,
         [email.toLowerCase(), providerId]
       );
@@ -410,6 +418,11 @@ export class AuthController {
             }
           }
           
+          // Run KYC handshake if it has never been attempted for this user
+          if (!user.sumsub_checked_at) {
+            await performKycHandshake(userId, email.toLowerCase());
+          }
+
           // Generate JWT token for session management
           const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
           const token = jwt.sign({ userId, email: email.toLowerCase() }, JWT_SECRET, { expiresIn: '7d' });
@@ -485,6 +498,13 @@ export class AuthController {
       }
 
       logger.info(`✅ User authenticated via Auth0: ${email} (${userId})`);
+
+      // Run KYC handshake for new users or users where it has never been attempted
+      const existingUserCheck = existingUser.rows.length > 0 ? existingUser.rows[0] : null;
+      const wasAlreadyRegistered = existingUserCheck?.email_verified || false;
+      if (!existingUserCheck?.sumsub_checked_at) {
+        await performKycHandshake(userId, email.toLowerCase());
+      }
       
       // Generate JWT token for session management
       const jwtSecret = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -493,10 +513,6 @@ export class AuthController {
         jwtSecret,
         { expiresIn: '7d' }
       );
-      
-      // Check if user was already registered
-      const existingUserCheck = existingUser.rows.length > 0 ? existingUser.rows[0] : null;
-      const wasAlreadyRegistered = existingUserCheck?.email_verified || false;
       
       return res.json({
         success: true,
