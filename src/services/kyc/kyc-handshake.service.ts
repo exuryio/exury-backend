@@ -27,9 +27,16 @@ export async function performKycHandshake(userId: string, email: string): Promis
     const applicantId = await sumsubService.findApplicantByExternalUserId(email);
 
     if (!applicantId) {
-      // No SumSub record — mark as checked so we don't retry on every login
-      await markSumsubChecked(userId);
-      logger.info(`KYC handshake: no SumSub record for ${email}`);
+      // No SumSub record — create a new applicant so the user can begin KYC
+      logger.info(`KYC handshake: no SumSub record for ${email}, creating new applicant`);
+      try {
+        const newApplicantId = await sumsubService.createApplicant(email, email);
+        await updateUserKycFromSumsub(userId, newApplicantId, 'init', undefined, undefined);
+        logger.info(`KYC handshake: created new applicant ${newApplicantId} for user ${userId}`);
+      } catch (createError: any) {
+        logger.error('KYC handshake: failed to create applicant', { userId, email, error: createError.message });
+        await markSumsubChecked(userId);
+      }
       return false;
     }
 
@@ -40,7 +47,7 @@ export async function performKycHandshake(userId: string, email: string): Promis
       userId,
       applicantId,
       reviewStatus ?? 'unknown',
-      reviewAnswer ?? 'RED',
+      reviewAnswer,
       reviewRejectType,
     );
 

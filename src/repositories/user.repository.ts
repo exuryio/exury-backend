@@ -81,7 +81,7 @@ export async function updateUserKycFromSumsub(
   userId: string,
   applicantId: string,
   reviewStatus: string,
-  reviewAnswer: string,
+  reviewAnswer?: string,
   reviewRejectType?: string
 ): Promise<void> {
   try {
@@ -94,7 +94,7 @@ export async function updateUserKycFromSumsub(
            sumsub_checked_at = NOW(),
            updated_at = NOW()
        WHERE id = $5`,
-      [applicantId, reviewStatus, reviewAnswer, reviewRejectType ?? null, userId]
+      [applicantId, reviewStatus, reviewAnswer ?? null, reviewRejectType ?? null, userId]
     );
   } catch (error: any) {
     logger.error('updateUserKycFromSumsub failed', { userId, error: error.message });

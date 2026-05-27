@@ -29,6 +29,12 @@ interface SumsubApplicantBody {
   id?: string;
 }
 
+/** Shape of POST /resources/applicants response */
+interface SumsubCreateApplicantBody {
+  id?: string;
+  externalUserId?: string;
+}
+
 class SumsubService {
   private readonly baseUrl = sumsubConfig.baseUrl.replace(/\/+$/, '');
 
@@ -91,6 +97,43 @@ class SumsubService {
             ? payload.slice(0, 500)
             : JSON.stringify(payload ?? err.message).slice(0, 500);
         logger.error('SumSub API error (findApplicantByExternalUserId)', { status, body: bodySnippet });
+        throw new Error(`SumSub API HTTP ${status ?? 'unknown'}`, { cause: err });
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Create a new SumSub applicant for the given externalUserId and email.
+   * Returns the new SumSub applicant ID.
+   */
+  async createApplicant(externalUserId: string, email: string): Promise<string> {
+    const levelName = sumsubConfig.levelName;
+    const path = `/resources/applicants?levelName=${encodeURIComponent(levelName)}`;
+    const url = `${this.baseUrl}${path}`;
+    const body = JSON.stringify({ externalUserId, email });
+    const headers = this.signRequest('POST', path, body);
+
+    try {
+      const response = await axios.post<SumsubCreateApplicantBody>(url, body, {
+        headers,
+        timeout: 15_000,
+        validateStatus: (status: number) => status === 200 || status === 201,
+      });
+      const applicantId = response.data?.id;
+      if (!applicantId) {
+        throw new Error('SumSub createApplicant returned no id');
+      }
+      return applicantId;
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        const status = err.response?.status;
+        const payload = err.response?.data;
+        const bodySnippet =
+          typeof payload === 'string'
+            ? payload.slice(0, 500)
+            : JSON.stringify(payload ?? err.message).slice(0, 500);
+        logger.error('SumSub API error (createApplicant)', { status, body: bodySnippet });
         throw new Error(`SumSub API HTTP ${status ?? 'unknown'}`, { cause: err });
       }
       throw err;

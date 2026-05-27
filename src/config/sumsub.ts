@@ -62,6 +62,9 @@ const config = {
   appToken,
   secretKey,
 
+  /** KYC verification level name configured in the SumSub dashboard */
+  levelName: process.env.SUMSUB_LEVEL_NAME || 'basic-kyc-level',
+
   /** Matches the Sumsub dashboard environment for the loaded keys */
   credentialMode,
   /** @deprecated use credentialMode */
