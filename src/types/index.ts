@@ -129,6 +129,10 @@ export interface User {
    * @description Reject type provided by the KYC provider for this user, if their KYC was rejected. Provides more details on why the KYC was rejected (e.g. document issues, face mismatch, etc.)
    */
   applicant_review_reject_type?: string;
+  /**
+   * @description Timestamp of the last SumSub KYC handshake attempt. NULL means the handshake has never been run for this user.
+   */
+  sumsub_checked_at?: string;
 }
 
 export interface UserBalance {
