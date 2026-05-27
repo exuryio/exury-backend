@@ -24,6 +24,17 @@ interface SumsubApplicantStatusBody {
   };
 }
 
+/** Minimal shape of GET /resources/applicants/-;externalUserId={id}/one */
+interface SumsubApplicantBody {
+  id?: string;
+}
+
+/** Shape of POST /resources/applicants response */
+interface SumsubCreateApplicantBody {
+  id?: string;
+  externalUserId?: string;
+}
+
 class SumsubService {
   private readonly baseUrl = sumsubConfig.baseUrl.replace(/\/+$/, '');
 
@@ -53,6 +64,80 @@ class SumsubService {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     };
+  }
+
+  /**
+   * Look up a SumSub applicant by externalUserId (typically the user's email).
+   * Returns the SumSub applicant ID, or null if no record exists.
+   */
+  async findApplicantByExternalUserId(externalUserId: string): Promise<string | null> {
+    const id = externalUserId.trim();
+    if (!id) {
+      throw new Error('externalUserId is required');
+    }
+
+    const path = `/resources/applicants/-;externalUserId=${encodeURIComponent(id)}/one`;
+    const url = `${this.baseUrl}${path}`;
+    const headers = this.signRequest('GET', path);
+
+    try {
+      const response = await axios.get<SumsubApplicantBody>(url, {
+        headers,
+        timeout: 15_000,
+        validateStatus: (status: number) => status === 200 || status === 404,
+      });
+      if (response.status === 404) return null;
+      return response.data?.id ?? null;
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        const status = err.response?.status;
+        const payload = err.response?.data;
+        const bodySnippet =
+          typeof payload === 'string'
+            ? payload.slice(0, 500)
+            : JSON.stringify(payload ?? err.message).slice(0, 500);
+        logger.error('SumSub API error (findApplicantByExternalUserId)', { status, body: bodySnippet });
+        throw new Error(`SumSub API HTTP ${status ?? 'unknown'}`, { cause: err });
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Create a new SumSub applicant for the given externalUserId and email.
+   * Returns the new SumSub applicant ID.
+   */
+  async createApplicant(externalUserId: string, email: string): Promise<string> {
+    const levelName = sumsubConfig.levelName;
+    const path = `/resources/applicants?levelName=${encodeURIComponent(levelName)}`;
+    const url = `${this.baseUrl}${path}`;
+    const body = JSON.stringify({ externalUserId, email });
+    const headers = this.signRequest('POST', path, body);
+
+    try {
+      const response = await axios.post<SumsubCreateApplicantBody>(url, body, {
+        headers,
+        timeout: 15_000,
+        validateStatus: (status: number) => status === 200 || status === 201,
+      });
+      const applicantId = response.data?.id;
+      if (!applicantId) {
+        throw new Error('SumSub createApplicant returned no id');
+      }
+      return applicantId;
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        const status = err.response?.status;
+        const payload = err.response?.data;
+        const bodySnippet =
+          typeof payload === 'string'
+            ? payload.slice(0, 500)
+            : JSON.stringify(payload ?? err.message).slice(0, 500);
+        logger.error('SumSub API error (createApplicant)', { status, body: bodySnippet });
+        throw new Error(`SumSub API HTTP ${status ?? 'unknown'}`, { cause: err });
+      }
+      throw err;
+    }
   }
 
   async getKycStatus(applicantId: string): Promise<KYCResponse> {
