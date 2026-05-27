@@ -16,21 +16,21 @@ import {
 /**
  * Look up the user in SumSub and sync their KYC status to the local database.
  *
- * @param userId  Internal user ID
- * @param email   User's email — used as the SumSub externalUserId
+ * @param userId  Internal user ID - typically the same as externalUserId in SumSub, but can be configured differently if needed
+ * @param email   User's email
  * @returns true if the user is KYC-approved, false otherwise
  */
 export async function performKycHandshake(userId: string, email: string): Promise<boolean> {
   logger.info(`🔍 KYC handshake: checking SumSub for user ${userId} (${email})`);
 
   try {
-    const applicantId = await sumsubService.findApplicantByExternalUserId(email);
+    const applicantId = await sumsubService.findApplicantByExternalUserId(userId);
 
     if (!applicantId) {
       // No SumSub record — create a new applicant so the user can begin KYC
       logger.info(`KYC handshake: no SumSub record for ${email}, creating new applicant`);
       try {
-        const newApplicantId = await sumsubService.createApplicant(email, email);
+        const newApplicantId = await sumsubService.createApplicant(userId, email);
         await updateUserKycFromSumsub(userId, newApplicantId, 'init', undefined, undefined);
         logger.info(`KYC handshake: created new applicant ${newApplicantId} for user ${userId}`);
       } catch (createError: any) {
