@@ -1,6 +1,7 @@
 /**
  * SumSub API client — applicant review status
  */
+import { type Request } from 'express';
 import axios from 'axios';
 import crypto from 'crypto';
 import sumsubConfig from '../../config/sumsub';
@@ -186,6 +187,34 @@ class SumsubService {
       }
       throw err;
     }
+  }
+
+  checkDigest(req: Request): boolean {
+    const algorythmHeader = 'X-Payload-Digest-Alg';
+    const algorythm: string | undefined = typeof req.headers[algorythmHeader] === 'object' ?
+      req.headers[algorythmHeader][0] :
+      req.headers[algorythmHeader];
+
+    if (!algorythm) {
+      throw new Error('Missing X-Payload-Digest-Alg header');
+    }
+
+    const algo = {
+      'HMAC_SHA1_HEX': 'sha1',
+      'HMAC_SHA256_HEX': 'sha256',
+      'HMAC_SHA512_HEX': 'sha512',
+    }[algorythm];
+
+    if (!algo) {
+      throw new Error('Unsupported algorithm')
+    }
+
+    const calculatedDigest = crypto
+      .createHmac(algo, process.env.SUMSUB_WEBHOOK_SECRET ?? '')
+      .update(typeof req.body === 'object' ? JSON.stringify(req.body) : String(req.body))
+      .digest('hex')
+
+    return calculatedDigest === req.headers['x-payload-digest']
   }
 
   async getKycStatus(applicantId: string): Promise<KYCResponse> {
