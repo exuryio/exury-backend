@@ -65,6 +65,7 @@ router.get('/users/me/balances/:asset', decodeTokenMiddleware, (req, res) =>
 
 // KYC routes
 router.get('/users/me/kyc-status', decodeTokenMiddleware, (req, res) => kycController.checkKYCStatus(req, res));
+router.post('/kyc/access-token', decodeTokenMiddleware, (req, res) => kycController.getAccessToken(req, res));
 
 export default router;
 

@@ -1,5 +1,6 @@
 import { type Response } from 'express';
 import { getUserById } from '../repositories/user.repository';
+import { sumsubService } from '../services/sumsub/sumsub.service';
 import { AuthenticatedRequest } from '../types/authenticatedRequest';
 
 interface KYCStatusResponse {
@@ -35,6 +36,19 @@ export class KYCController {
     }
 
     return res.json(response);
+  }
+  async getAccessToken(req: AuthenticatedRequest, res: Response) {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    try {
+      const { token, userId: sumsubUserId } = await sumsubService.generateAccessToken(userId);
+      return res.json({ token, userId: sumsubUserId });
+    } catch (err: any) {
+      return res.status(502).json({ error: 'Error al inicializar el servicio de identidad. Por favor, reintenta.' });
+    }
   }
 }
 

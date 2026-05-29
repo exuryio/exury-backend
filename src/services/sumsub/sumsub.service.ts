@@ -35,6 +35,12 @@ interface SumsubCreateApplicantBody {
   externalUserId?: string;
 }
 
+/** Shape of POST /resources/accessTokens response */
+interface SumsubAccessTokenBody {
+  token?: string;
+  userId?: string;
+}
+
 class SumsubService {
   private readonly baseUrl = sumsubConfig.baseUrl.replace(/\/+$/, '');
 
@@ -134,6 +140,48 @@ class SumsubService {
             ? payload.slice(0, 500)
             : JSON.stringify(payload ?? err.message).slice(0, 500);
         logger.error('SumSub API error (createApplicant)', { status, body: bodySnippet });
+        throw new Error(`SumSub API HTTP ${status ?? 'unknown'}`, { cause: err });
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Generate a short-lived SDK access token for the given userId.
+   * The frontend uses this token to initialise the SumSub WebSDK.
+   */
+  async generateAccessToken(userId: string): Promise<{ token: string; userId: string }> {
+    const id = userId.trim();
+    if (!id) {
+      throw new Error('userId is required');
+    }
+
+    const levelName = sumsubConfig.levelName;
+    const body = JSON.stringify({ userId: id, levelName });
+    const path = `/resources/accessTokens/sdk`;
+    const url = `${this.baseUrl}${path}`;
+    const headers = this.signRequest('POST', path, body);
+
+    try {
+      const response = await axios.post<SumsubAccessTokenBody>(url, body, {
+        headers,
+        timeout: 15_000,
+        validateStatus: (status: number) => status === 200 || status === 201,
+      });
+      const token = response.data?.token;
+      if (!token) {
+        throw new Error('SumSub generateAccessToken returned no token');
+      }
+      return { token, userId: response.data.userId ?? id };
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        const status = err.response?.status;
+        const payload = err.response?.data;
+        const bodySnippet =
+          typeof payload === 'string'
+            ? payload.slice(0, 500)
+            : JSON.stringify(payload ?? err.message).slice(0, 500);
+        logger.error('SumSub API error (generateAccessToken)', { status, body: bodySnippet });
         throw new Error(`SumSub API HTTP ${status ?? 'unknown'}`, { cause: err });
       }
       throw err;
