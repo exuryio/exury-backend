@@ -103,6 +103,34 @@ export async function updateUserKycFromSumsub(
 }
 
 /**
+ * Update KYC fields for the user who owns the given SumSub applicant_id.
+ * Used by the SumSub webhook to keep local state in sync without polling.
+ */
+export async function updateUserKycByApplicantId(
+  applicantId: string,
+  reviewStatus: string,
+  reviewAnswer?: string,
+  reviewRejectType?: string
+): Promise<boolean> {
+  try {
+    const result = await pool.query(
+      `UPDATE users
+       SET applicant_review_status = $1,
+           applicant_review_answer = $2,
+           applicant_review_reject_type = $3,
+           sumsub_checked_at = NOW(),
+           updated_at = NOW()
+       WHERE applicant_id = $4`,
+      [reviewStatus, reviewAnswer ?? null, reviewRejectType ?? null, applicantId]
+    );
+    return (result.rowCount ?? 0) > 0;
+  } catch (error: any) {
+    logger.error('updateUserKycByApplicantId failed', { applicantId, error: error.message });
+    throw error;
+  }
+}
+
+/**
  * Record that the SumSub handshake was attempted (even if no applicant was found).
  * Prevents repeated lookups on every login.
  */

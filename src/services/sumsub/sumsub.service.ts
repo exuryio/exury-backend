@@ -1,6 +1,7 @@
 /**
  * SumSub API client — applicant review status
  */
+import { type Request } from 'express';
 import axios from 'axios';
 import crypto from 'crypto';
 import sumsubConfig from '../../config/sumsub';
@@ -33,6 +34,12 @@ interface SumsubApplicantBody {
 interface SumsubCreateApplicantBody {
   id?: string;
   externalUserId?: string;
+}
+
+/** Shape of POST /resources/accessTokens response */
+interface SumsubAccessTokenBody {
+  token?: string;
+  userId?: string;
 }
 
 class SumsubService {
@@ -138,6 +145,76 @@ class SumsubService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Generate a short-lived SDK access token for the given userId.
+   * The frontend uses this token to initialise the SumSub WebSDK.
+   */
+  async generateAccessToken(userId: string): Promise<{ token: string; userId: string }> {
+    const id = userId.trim();
+    if (!id) {
+      throw new Error('userId is required');
+    }
+
+    const levelName = sumsubConfig.levelName;
+    const body = JSON.stringify({ userId: id, levelName });
+    const path = `/resources/accessTokens/sdk`;
+    const url = `${this.baseUrl}${path}`;
+    const headers = this.signRequest('POST', path, body);
+
+    try {
+      const response = await axios.post<SumsubAccessTokenBody>(url, body, {
+        headers,
+        timeout: 15_000,
+        validateStatus: (status: number) => status === 200 || status === 201,
+      });
+      const token = response.data?.token;
+      if (!token) {
+        throw new Error('SumSub generateAccessToken returned no token');
+      }
+      return { token, userId: response.data.userId ?? id };
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        const status = err.response?.status;
+        const payload = err.response?.data;
+        const bodySnippet =
+          typeof payload === 'string'
+            ? payload.slice(0, 500)
+            : JSON.stringify(payload ?? err.message).slice(0, 500);
+        logger.error('SumSub API error (generateAccessToken)', { status, body: bodySnippet });
+        throw new Error(`SumSub API HTTP ${status ?? 'unknown'}`, { cause: err });
+      }
+      throw err;
+    }
+  }
+
+  checkDigest(req: Request): boolean {
+    const algorythmHeader = 'X-Payload-Digest-Alg';
+    const algorythm: string | undefined = typeof req.headers[algorythmHeader] === 'object' ?
+      req.headers[algorythmHeader][0] :
+      req.headers[algorythmHeader];
+
+    if (!algorythm) {
+      throw new Error('Missing X-Payload-Digest-Alg header');
+    }
+
+    const algo = {
+      'HMAC_SHA1_HEX': 'sha1',
+      'HMAC_SHA256_HEX': 'sha256',
+      'HMAC_SHA512_HEX': 'sha512',
+    }[algorythm];
+
+    if (!algo) {
+      throw new Error('Unsupported algorithm')
+    }
+
+    const calculatedDigest = crypto
+      .createHmac(algo, process.env.SUMSUB_WEBHOOK_SECRET ?? '')
+      .update(typeof req.body === 'object' ? JSON.stringify(req.body) : String(req.body))
+      .digest('hex')
+
+    return calculatedDigest === req.headers['x-payload-digest']
   }
 
   async getKycStatus(applicantId: string): Promise<KYCResponse> {
