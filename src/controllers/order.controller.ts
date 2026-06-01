@@ -7,7 +7,7 @@ import { type Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { orderRepository } from '../repositories/order.repository';
 import { pricingService } from '../services/pricing/pricing.service';
-import { getOrCreateAnonymousUserId } from '../repositories/user.repository';
+import { resolveOrderUserId } from '../repositories/user.repository';
 import { OrderStatus } from '../types';
 import { logger } from '../config/logger';
 import { pool } from '../config/database';
@@ -28,8 +28,10 @@ export class OrderController {
 
     try {
       const { quote_id, type, amount_eur, amount_crypto } = req.body;
-      const userId =
-        req.user?.userId || (await getOrCreateAnonymousUserId());
+      const userId = await resolveOrderUserId(
+        req.user?.userId,
+        req.user?.email
+      );
 
       if (!quote_id) {
         res.status(400).json({ error: 'quote_id is required' });
@@ -114,8 +116,10 @@ export class OrderController {
   async getOrder(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const userId =
-        req.user?.userId || (await getOrCreateAnonymousUserId());
+      const userId = await resolveOrderUserId(
+        req.user?.userId,
+        req.user?.email
+      );
 
       const order = await orderRepository.findById(id);
       if (!order) {
@@ -166,8 +170,10 @@ export class OrderController {
    */
   async getUserOrders(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const userId =
-        req.user?.userId || (await getOrCreateAnonymousUserId());
+      const userId = await resolveOrderUserId(
+        req.user?.userId,
+        req.user?.email
+      );
 
       const orders = await orderRepository.findByUserId(userId);
 

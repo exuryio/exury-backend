@@ -52,6 +52,14 @@ app.use(cors({
       return callback(null, true);
     }
 
+    // Local frontend (Vite :5173, preview, etc.)
+    if (
+      NODE_ENV === 'development' &&
+      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+    ) {
+      return callback(null, true);
+    }
+
     logger.warn('Blocked CORS origin', { origin });
     callback(null, false);
   },
