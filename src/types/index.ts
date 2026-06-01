@@ -81,6 +81,10 @@ export interface Order {
   status: OrderStatus;
   paymentId?: string;
   binanceOrderId?: string;
+  iban?: string | null;
+  holderName?: string | null;
+  bankName?: string | null;
+  bankAccountId?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

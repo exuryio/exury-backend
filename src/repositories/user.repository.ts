@@ -47,6 +47,36 @@ export async function getOrCreateAnonymousUserId(): Promise<string> {
 }
 
 
+/**
+ * Usuario para crear órdenes: JWT si existe en BD, si no anónimo.
+ * Evita 500 por FK cuando el token es de otro entorno (p. ej. producción vs local).
+ */
+export async function userExistsById(userId: string): Promise<boolean> {
+  const result = await pool.query(
+    'SELECT 1 FROM users WHERE id = $1 LIMIT 1',
+    [userId]
+  );
+  return result.rows.length > 0;
+}
+
+export async function resolveOrderUserId(
+  tokenUserId?: string,
+  tokenEmail?: string
+): Promise<string> {
+  if (tokenUserId && (await userExistsById(tokenUserId))) {
+    return tokenUserId;
+  }
+
+  if (tokenUserId) {
+    logger.warn('resolveOrderUserId: userId del token no está en BD local', {
+      userId: tokenUserId,
+      email: tokenEmail,
+    });
+  }
+
+  return getOrCreateAnonymousUserId();
+}
+
 export async function getUserById(userId: string) {
   try {
     const result = await pool.query<User>(

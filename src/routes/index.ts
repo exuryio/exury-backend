@@ -9,6 +9,8 @@ import { paydoController } from '../controllers/paydo.controller';
 import { balanceController } from '../controllers/balance.controller';
 import { authController } from '../controllers/auth.controller';
 import { kycController } from '../controllers/kyc.controller';
+import { depositWalletsController } from '../controllers/deposit-wallets.controller';
+import { bankAccountController } from '../controllers/bank-account.controller';
 import { AuthenticatedRequest, DecodedToken } from '../types/authenticatedRequest';
 
 const router = Router();
@@ -45,6 +47,11 @@ router.post('/quotes/:id/lock', (req, res) =>
   quoteController.lockQuote(req, res)
 );
 
+// Sell flow: direcciones de depósito (público, lee EXURY_DEPOSIT_WALLETS_JSON)
+router.get('/deposit-wallets', (req, res) =>
+  depositWalletsController.getDepositWallets(req, res)
+);
+
 // Order routes
 router.post('/orders', decodeTokenMiddleware, (req, res) => orderController.createOrder(req, res));
 router.get('/orders', decodeTokenMiddleware, (req, res) => orderController.getUserOrders(req, res));
@@ -65,6 +72,17 @@ router.get('/users/me/balances/:asset', decodeTokenMiddleware, (req, res) =>
 
 // KYC routes
 router.get('/users/me/kyc-status', decodeTokenMiddleware, (req, res) => kycController.checkKYCStatus(req, res));
+
+// Bank accounts (sell flow — requiere usuario autenticado real)
+router.get('/users/me/bank-accounts', decodeTokenMiddleware, (req, res) =>
+  bankAccountController.list(req, res)
+);
+router.post('/users/me/bank-accounts', decodeTokenMiddleware, (req, res) =>
+  bankAccountController.save(req, res)
+);
+router.delete('/users/me/bank-accounts/:id', decodeTokenMiddleware, (req, res) =>
+  bankAccountController.remove(req, res)
+);
 
 export default router;
 

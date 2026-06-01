@@ -121,6 +121,10 @@ class OrderRepository {
       status: row.status as OrderStatus,
       paymentId: row.payment_id,
       binanceOrderId: row.binance_order_id,
+      iban: row.iban ?? null,
+      holderName: row.holder_name ?? null,
+      bankName: row.bank_name ?? null,
+      bankAccountId: row.bank_account_id ?? null,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
     };
