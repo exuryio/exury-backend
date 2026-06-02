@@ -9,7 +9,6 @@ import { paydoController } from '../controllers/paydo.controller';
 import { balanceController } from '../controllers/balance.controller';
 import { authController } from '../controllers/auth.controller';
 import { kycController } from '../controllers/kyc.controller';
-import { hooksController } from '../controllers/hooks.controller';
 import { AuthenticatedRequest, DecodedToken } from '../types/authenticatedRequest';
 
 const router = Router();
