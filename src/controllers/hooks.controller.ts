@@ -36,10 +36,20 @@ export class HooksController {
       return;
     }
 
-    const payload = req.body as SumsubWebhookPayload;
-    const { applicantId, type, reviewStatus, reviewResult, externalUserId } = payload;
+    const payload = req.body as Buffer;
+    // convert Buffer to string and parse JSON
+    let parsedPayload: SumsubWebhookPayload;
+    try {
+      const payloadString = payload.toString('utf-8');
+      parsedPayload = JSON.parse(payloadString) as SumsubWebhookPayload;
+    } catch (error: any) {
+      logger.error('SumSub webhook rejected: invalid JSON', { error: error.message });
+      res.status(400).json({ error: 'Invalid JSON payload' });
+      return;
+    }
+    const { applicantId, reviewStatus, reviewResult } = parsedPayload;
 
-    logger.info('SumSub webhook received', { type, applicantId, externalUserId, reviewStatus });
+    logger.info('SumSub webhook received', JSON.stringify(parsedPayload));
 
     if (!applicantId) {
       // Acknowledge events we don't care about without erroring
