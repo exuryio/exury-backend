@@ -208,7 +208,7 @@ class SumsubService {
 
     const calculatedDigest = crypto
       .createHmac(algo, process.env.SUMSUB_WEBHOOK_SECRET ?? '')
-      .update(typeof req.body === 'object' ? JSON.stringify(req.body) : String(req.body))
+      .update(req.body)
       .digest('hex')
 
     return calculatedDigest === req.headers['x-payload-digest']
