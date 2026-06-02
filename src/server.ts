@@ -10,6 +10,7 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { logger } from './config/logger';
 import routes from './routes';
+import { hooksController } from './controllers/hooks.controller';
 
 console.log('✅ All imports loaded');
 
@@ -51,6 +52,22 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+app.post('/webhook/sumsub', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
+  logger.info('Received SumSub webhook', { path: req.path, method: req.method });
+  console.log('Received SumSub webhook');
+  console.log('Headers:', req.headers);
+  console.log('Body:', req.body.toString());
+
+  try {
+    return await hooksController.handleSumsubWebhook(req, res);
+  } catch (error) {
+    logger.error('Error handling SumSub webhook', { error: (error as Error).message, stack: (error as Error).stack });
+    console.error('Error handling SumSub webhook:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 console.log('✅ Middleware configured');
