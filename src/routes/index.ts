@@ -14,17 +14,19 @@ import { AuthenticatedRequest, DecodedToken } from '../types/authenticatedReques
 
 const router = Router();
 
-const decodeTokenMiddleware = (req: AuthenticatedRequest, _res: Response, next: NextFunction) => {
+const UNAUTHORIZED_MESSAGE = 'Unauthorized';
+
+const decodeTokenMiddleware = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   const bearerToken = authHeader?.split(' ')[1];
 
   if (!bearerToken) {
-    return next();
+    return res.status(401).send(UNAUTHORIZED_MESSAGE);
   }
 
   const decodedToken = jwt.decode(bearerToken);
   if (!decodedToken || typeof decodedToken === 'string') {
-    return next();
+    return res.status(401).send(UNAUTHORIZED_MESSAGE);
   }
 
   req.user = decodedToken as DecodedToken;
@@ -51,11 +53,6 @@ router.post('/orders', decodeTokenMiddleware, (req, res) => orderController.crea
 router.get('/orders', decodeTokenMiddleware, (req, res) => orderController.getUserOrders(req, res));
 router.get('/orders/:id', decodeTokenMiddleware, (req, res) => orderController.getOrder(req, res));
 
-// PayDo webhook
-router.post('/payments/paydo/webhook', (req, res) =>
-  paydoController.handleWebhook(req, res)
-);
-
 // Balance routes
 router.get('/users/me/balances', decodeTokenMiddleware, (req, res) =>
   balanceController.getBalances(req, res)
@@ -70,6 +67,9 @@ router.post('/kyc/access-token', decodeTokenMiddleware, (req, res) => kycControl
 
 // Webhook: SumSub KYC status updates
 router.post('/hooks/sumsub', (req, res) => hooksController.handleSumsubWebhook(req, res));
+
+// PayDo webhook
+router.post('/payments/paydo/webhook', (req, res) => paydoController.handleWebhook(req, res));
 
 export default router;
 
