@@ -54,11 +54,6 @@ app.use(cors({
 }));
 
 app.post('/webhook/sumsub', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
-  logger.info('Received SumSub webhook', { path: req.path, method: req.method });
-  console.log('Received SumSub webhook');
-  console.log('Headers:', req.headers);
-  console.log('Body:', req.body.toString());
-
   try {
     return await hooksController.handleSumsubWebhook(req, res);
   } catch (error) {

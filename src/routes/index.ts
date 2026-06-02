@@ -9,7 +9,6 @@ import { paydoController } from '../controllers/paydo.controller';
 import { balanceController } from '../controllers/balance.controller';
 import { authController } from '../controllers/auth.controller';
 import { kycController } from '../controllers/kyc.controller';
-import { hooksController } from '../controllers/hooks.controller';
 import { AuthenticatedRequest, DecodedToken } from '../types/authenticatedRequest';
 
 const router = Router();
@@ -64,9 +63,6 @@ router.get('/users/me/balances/:asset', decodeTokenMiddleware, (req, res) =>
 // KYC routes
 router.get('/users/me/kyc-status', decodeTokenMiddleware, (req, res) => kycController.checkKYCStatus(req, res));
 router.post('/kyc/access-token', decodeTokenMiddleware, (req, res) => kycController.getAccessToken(req, res));
-
-// Webhook: SumSub KYC status updates
-router.post('/hooks/sumsub', (req, res) => hooksController.handleSumsubWebhook(req, res));
 
 // PayDo webhook
 router.post('/payments/paydo/webhook', (req, res) => paydoController.handleWebhook(req, res));
