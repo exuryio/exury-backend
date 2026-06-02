@@ -18,6 +18,7 @@ export interface KYCResponse {
 
 /** Shape of GET /resources/applicants/{id}/status (see Sumsub docs) */
 interface SumsubApplicantStatusBody {
+  levelName?: string;
   reviewStatus?: string;
   reviewResult?: {
     reviewAnswer?: string;
@@ -247,6 +248,10 @@ class SumsubService {
         throw new Error(`SumSub API HTTP ${status ?? 'unknown'}`, { cause: err });
       }
       throw err;
+    }
+
+    if (data.levelName !== sumsubConfig.levelName) {
+      throw new Error(`Unexpected levelName in SumSub response: ${data.levelName}`);
     }
 
     const reviewResult = data.reviewResult ?? {};

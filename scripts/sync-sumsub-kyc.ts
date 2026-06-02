@@ -29,6 +29,7 @@ async function syncSumsubKyc() {
      FROM users
        WHERE applicant_id IS NOT NULL
        AND applicant_id <> ''
+       AND sumsub_checked_at IS NULL
      ORDER BY created_at ASC`,
   );
 
