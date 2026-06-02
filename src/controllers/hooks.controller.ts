@@ -52,6 +52,7 @@ export class HooksController {
 
     logger.info(payloadString);
     logger.info('SumSub webhook received', parsedPayload);
+    logger.info('applicantId', applicantId);
 
     if (!applicantId) {
       // Acknowledge events we don't care about without erroring
