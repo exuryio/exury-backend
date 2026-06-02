@@ -192,13 +192,9 @@ class SumsubService {
 
   checkDigest(req: Request): boolean {
     const algorythmHeader = 'X-Payload-Digest-Alg';
-    const algorythm: string | undefined = typeof req.headers[algorythmHeader] === 'object' ?
+    const algorythm: string = (typeof req.headers[algorythmHeader] === 'object' ?
       req.headers[algorythmHeader][0] :
-      req.headers[algorythmHeader];
-
-    if (!algorythm) {
-      throw new Error('Missing X-Payload-Digest-Alg header');
-    }
+      req.headers[algorythmHeader]) || 'HMAC_SHA256_HEX';
 
     const algo = {
       'HMAC_SHA1_HEX': 'sha1',
