@@ -119,13 +119,11 @@ process.on('uncaughtException', (error: Error) => {
   console.error('❌ Uncaught Exception:', error);
   console.error('Stack:', error.stack);
   logger.error('Uncaught Exception', { error: error.message, stack: error.stack });
-  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
   console.error('❌ Unhandled Rejection:', reason);
   logger.error('Unhandled Rejection', { reason: String(reason) });
-  process.exit(1);
 });
 
 // Start server with error handling
